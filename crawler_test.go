@@ -69,17 +69,23 @@ func TestExampleForeachValueStream(t *testing.T) {
 	craw.SetClient(client)
 
 	stream := craw.GetDataStream()
-	defer close(stream)
 	data := make([]interface{}, 0)
 
+	// Use a channel to signal when goroutine is done collecting
+	done := make(chan struct{})
 	go func() {
 		for d := range stream {
 			data = append(data, d)
 		}
+		close(done)
 	}()
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
+
+	// Close stream to signal no more data, then wait for goroutine to finish
+	close(stream)
+	<-done
 
 	var expected interface{}
 	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/example_foreach_value/output.json")
