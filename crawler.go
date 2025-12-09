@@ -135,8 +135,7 @@ type ApiCrawler struct {
 	DataStream          chan any
 	logger              Logger
 	httpClient          HTTPClient
-	profiler            chan StepProfilerData
-	enableProfilation   bool
+	profiler            *Profiler
 	templateCache       map[string]*template.Template
 	jqCache             map[string]*gojq.Code
 	mergeMutex          sync.Mutex // Protects concurrent merge operations
@@ -194,9 +193,8 @@ func (a *ApiCrawler) SetClient(client HTTPClient) {
 }
 
 func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
-	a.enableProfilation = true
-	a.profiler = make(chan StepProfilerData)
-	return a.profiler
+	a.profiler = NewProfiler(&a.mergeMutex)
+	return a.profiler.Channel()
 }
 
 // getOrCompileTemplate retrieves a pre-compiled template from the cache,
@@ -276,19 +274,7 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 	currentContext := "root"
 
 	// Emit ROOT_START event
-	var rootID string
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_ROOT_START, "Root Start", "", Step{})
-		event.Data = map[string]any{
-			"contextMap": c.serializeContextMapSafe(c.ContextMap),
-			"config": map[string]any{
-				"rootContext": c.Config.RootContext,
-				"stream":      c.Config.Stream,
-			},
-		}
-		c.profiler <- event
-		rootID = event.ID
-	}
+	rootID := c.profiler.EmitRootStart(c.Config, c.ContextMap)
 
 	for _, step := range c.Config.Steps {
 		ecxec := newStepExecution(step, currentContext, c.ContextMap, rootID)
@@ -298,15 +284,8 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 	}
 
 	// Emit final result if not streaming
-	if c.profiler != nil && !c.Config.Stream {
-		resultEvent := newProfilerEvent(EVENT_RESULT, "Final Result", rootID, Step{})
-		c.mergeMutex.Lock()
-		finalResult := copyDataSafe(rootCtx.Data)
-		c.mergeMutex.Unlock()
-		resultEvent.Data = map[string]any{
-			"result": finalResult,
-		}
-		c.profiler <- resultEvent
+	if !c.Config.Stream {
+		c.profiler.EmitFinalResult(rootID, rootCtx.Data)
 	}
 
 	return nil
@@ -330,16 +309,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 	// Emit REQUEST_STEP_START event
 	stepStartTime := time.Now()
-	var stepID string
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_REQUEST_STEP_START, exec.step.Name, exec.parentID, exec.step)
-		event.Data = map[string]any{
-			"stepName":   exec.step.Name,
-			"stepConfig": exec.step,
-		}
-		c.profiler <- event
-		stepID = event.ID
-	}
+	stepID := c.profiler.EmitRequestStepStart(exec.step, exec.parentID)
 
 	templateCtx := contextMapToTemplate(exec.contextMap)
 
@@ -350,14 +320,14 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	}
 
 	// Set profiler on authenticator
-	if authenticator != nil && c.profiler != nil {
-		authenticator.SetProfiler(c.profiler)
+	if authenticator != nil && c.profiler.Enabled() {
+		authenticator.SetProfiler(c.profiler.Channel())
 	}
 
 	// Initialize paginator
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
-		emitProfilerError(c.profiler, "Paginator Error", stepID, err.Error())
+		c.profiler.EmitError("Paginator Error", stepID, err.Error())
 		return fmt.Errorf("error creating request paginator: %w", err)
 	}
 
@@ -381,15 +351,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		// Emit REQUEST_PAGE_START event
 		pageStartTime := time.Now()
-		var pageID string
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_REQUEST_PAGE_START, fmt.Sprintf("Page %d", pageNum), stepID, exec.step)
-			event.Data = map[string]any{
-				"pageNumber": pageNum,
-			}
-			c.profiler <- event
-			pageID = event.ID
-		}
+		pageID := c.profiler.EmitRequestPageStart(stepID, exec.step, pageNum)
 
 		// Prepare HTTP request
 		reqCtx := httpRequestContext{
@@ -407,15 +369,12 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx, c.Config.Headers)
 		if err != nil {
-			emitProfilerError(c.profiler, "Prepare Request Error", pageID, err.Error())
+			c.profiler.EmitError("Prepare Request Error", pageID, err.Error())
 			return err
 		}
 
-		// Emit URL_COMPOSITION event
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_URL_COMPOSITION, "URL Composition", pageID, exec.step)
-
-			// Build result headers and body from request
+		// Emit URL_COMPOSITION event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
 			resultHeaders := make(map[string]string)
 			for k, v := range req.Header {
 				if len(v) > 0 {
@@ -425,32 +384,26 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 			var resultBody interface{}
 			if req.Body != nil {
-				// Note: Request body is already set, we don't read it here to avoid consuming it
 				resultBody = next.BodyParams
 			}
 
-			event.Data = map[string]any{
-				"urlTemplate": exec.step.Request.URL,
-				"paginationState": map[string]any{
-					"pageNumber":  pageNum,
-					"queryParams": next.QueryParams,
-					"bodyParams":  next.BodyParams,
-					"nextPageUrl": next.NextPageUrl,
-				},
-				"goTemplateContext": templateCtx,
-				"resultUrl":         urlObj.String(),
-				"resultHeaders":     resultHeaders,
-				"resultBody":        resultBody,
-			}
-			c.profiler <- event
+			c.profiler.EmitURLComposition(pageID, exec.step, URLCompositionData{
+				URLTemplate:     exec.step.Request.URL,
+				PageNumber:      pageNum,
+				QueryParams:     next.QueryParams,
+				BodyParams:      next.BodyParams,
+				NextPageURL:     next.NextPageUrl,
+				TemplateContext: templateCtx,
+				ResultURL:       urlObj.String(),
+				ResultHeaders:   resultHeaders,
+				ResultBody:      resultBody,
+			})
 		}
 
 		c.logger.Info("[Request] %s", urlObj.String())
 
-		// Emit REQUEST_DETAILS event
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_REQUEST_DETAILS, "Request Details", pageID, exec.step)
-
+		// Emit REQUEST_DETAILS event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
 			// Build curl command
 			curlCmd := fmt.Sprintf("curl -X %s '%s'", req.Method, urlObj.String())
 			for k, v := range req.Header {
@@ -471,14 +424,13 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				}
 			}
 
-			event.Data = map[string]any{
-				"curl":    curlCmd,
-				"method":  req.Method,
-				"url":     urlObj.String(),
-				"headers": headers,
-				"body":    next.BodyParams,
-			}
-			c.profiler <- event
+			c.profiler.EmitRequestDetails(pageID, exec.step, RequestDetailsData{
+				CurlCommand: curlCmd,
+				Method:      req.Method,
+				URL:         urlObj.String(),
+				Headers:     headers,
+				Body:        next.BodyParams,
+			})
 		}
 
 		c.logger.Debug("[Request] Got response: status pending")
@@ -487,46 +439,47 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		requestStartTime := time.Now()
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			emitProfilerError(c.profiler, "Request Error", pageID, err.Error())
+			c.profiler.EmitError("Request Error", pageID, err.Error())
 			return fmt.Errorf("error performing HTTP request: %w", err)
 		}
 		defer resp.Body.Close()
 		durationMs := time.Since(requestStartTime).Milliseconds()
 
-		// Emit HTTP response event with metadata and duration
+		// Compute response size
 		responseSize := int(resp.ContentLength)
 		if responseSize < 0 {
 			responseSize = 0
 		}
 
-		// Capture pagination state BEFORE calling paginator.Next()
-		previousPageState := map[string]any{
-			"pageNumber": pageNum,
-			"params": map[string]any{
-				"queryParams": next.QueryParams,
-				"bodyParams":  next.BodyParams,
-			},
-			"nextPageUrl": next.NextPageUrl,
+		// Capture pagination state BEFORE calling paginator.Next() (only if profiling)
+		var previousPageState map[string]any
+		if c.profiler.Enabled() {
+			previousPageState = map[string]any{
+				"pageNumber": pageNum,
+				"params": map[string]any{
+					"queryParams": next.QueryParams,
+					"bodyParams":  next.BodyParams,
+				},
+				"nextPageUrl": next.NextPageUrl,
+			}
 		}
 
 		// Update pagination state (reads and restores response body)
 		next, stop, err = paginator.Next(resp)
 		if err != nil {
-			emitProfilerError(c.profiler, "Paginator Error", pageID, err.Error())
+			c.profiler.EmitError("Paginator Error", pageID, err.Error())
 			return fmt.Errorf("paginator update error: %w", err)
 		}
 
 		// Decode JSON response
 		var raw interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-			emitProfilerError(c.profiler, "Response Decode Error", pageID, err.Error())
+			c.profiler.EmitError("Response Decode Error", pageID, err.Error())
 			return fmt.Errorf("error decoding response JSON: %w", err)
 		}
 
 		// Emit PAGINATION_EVAL event (if pagination is configured and this is not the first page)
-		if pageNum > 0 && c.profiler != nil && !stop {
-			event := newProfilerEvent(EVENT_PAGINATION_EVAL, "Pagination Evaluation", pageID, exec.step)
-
+		if pageNum > 0 && c.profiler.Enabled() && !stop {
 			afterPageState := map[string]any{
 				"pageNumber": paginator.PageNum(),
 				"params": map[string]any{
@@ -536,24 +489,18 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				"nextPageUrl": next.NextPageUrl,
 			}
 
-			event.Data = map[string]any{
-				"pageNumber":       pageNum,
-				"paginationConfig": exec.step.Request.Pagination,
-				"previousResponse": map[string]any{
-					"body":    copyDataSafe(previousResponseBody),
-					"headers": previousResponseHeaders,
-				},
-				"previousState": previousPageState,
-				"afterState":    afterPageState,
-			}
-			c.profiler <- event
+			c.profiler.EmitPaginationEval(pageID, exec.step, PaginationEvalData{
+				PageNumber:           pageNum,
+				PaginationConfig:     exec.step.Request.Pagination,
+				PreviousResponseBody: previousResponseBody,
+				PreviousHeaders:      previousResponseHeaders,
+				PreviousState:        previousPageState,
+				AfterState:           afterPageState,
+			})
 		}
 
-		// Emit REQUEST_RESPONSE event
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_REQUEST_RESPONSE, "Request Response", pageID, exec.step)
-
-			// Build response headers map
+		// Emit REQUEST_RESPONSE event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
 			responseHeaders := make(map[string]string)
 			for k, v := range resp.Header {
 				if len(v) > 0 {
@@ -561,44 +508,35 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				}
 			}
 
-			event.Data = map[string]any{
-				"statusCode":   resp.StatusCode,
-				"headers":      responseHeaders,
-				"body":         copyDataSafe(raw),
-				"responseSize": responseSize,
-				"durationMs":   durationMs,
-			}
-			c.profiler <- event
+			c.profiler.EmitRequestResponse(pageID, exec.step, ResponseData{
+				StatusCode:   resp.StatusCode,
+				Headers:      responseHeaders,
+				Body:         raw,
+				ResponseSize: responseSize,
+				DurationMs:   durationMs,
+			})
 		}
 
-		// Store response for next PAGINATION_EVAL event
-		previousResponseBody = raw
-		previousResponseHeaders = make(map[string]string)
-		for k, v := range resp.Header {
-			if len(v) > 0 {
-				previousResponseHeaders[k] = v[0]
+		// Store response for next PAGINATION_EVAL event (only if profiling)
+		if c.profiler.Enabled() {
+			previousResponseBody = raw
+			previousResponseHeaders = make(map[string]string)
+			for k, v := range resp.Header {
+				if len(v) > 0 {
+					previousResponseHeaders[k] = v[0]
+				}
 			}
 		}
 
 		// Transform response
 		transformed, err := c.transformResult(raw, exec.step.ResultTransformer, templateCtx)
 		if err != nil {
-			emitProfilerError(c.profiler, "Response Transform Error", pageID, err.Error())
+			c.profiler.EmitError("Response Transform Error", pageID, err.Error())
 			return err
 		}
 
 		// Emit RESPONSE_TRANSFORM event
-		if c.profiler != nil && exec.step.ResultTransformer != "" {
-			event := newProfilerEvent(EVENT_RESPONSE_TRANSFORM, "Response Transform", pageID, exec.step)
-
-			event.Data = map[string]any{
-				"transformRule":  exec.step.ResultTransformer,
-				"beforeResponse": copyDataSafe(raw),
-				"afterResponse":  copyDataSafe(transformed),
-				// TODO: Add diff computation
-			}
-			c.profiler <- event
-		}
+		c.profiler.EmitResponseTransform(pageID, exec.step, exec.step.ResultTransformer, raw, transformed)
 
 		// Execute nested steps on transformed result
 		// Note: request steps create a working context for the response data.
@@ -609,16 +547,8 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		workingContextKey := cloneResult.workingKey
 
 		// Emit CONTEXT_SELECTION event (context created for nested steps)
-		if c.profiler != nil && len(exec.step.Steps) > 0 {
-			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", pageID, exec.step)
-			contextPath := buildContextPath(childContextMap, workingContextKey)
-			event.Data = map[string]any{
-				"contextPath":        contextPath,
-				"currentContextKey":  workingContextKey,
-				"currentContextData": copyDataSafe(childContextMap[workingContextKey].Data),
-				"fullContextMap":     c.serializeContextMapSafe(childContextMap),
-			}
-			c.profiler <- event
+		if len(exec.step.Steps) > 0 {
+			c.profiler.EmitContextSelection(pageID, exec.step, workingContextKey, childContextMap)
 		}
 
 		for _, step := range exec.step.Steps {
@@ -640,24 +570,17 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			templateContext: templateCtx,
 		}
 
-		var dataBefore any = nil
-		if c.profiler != nil {
-			// Capture data before merge with mutex protection
-			c.mergeMutex.Lock()
-			dataBefore = copyDataSafe(exec.currentContext.Data)
-			c.mergeMutex.Unlock()
-		}
+		// Capture data before merge (only if profiling)
+		dataBefore := c.profiler.CaptureContextDataBefore(exec.currentContext)
 
 		mergeStepName, err := c.performMerge(mergeOp)
 		if err != nil {
-			emitProfilerError(c.profiler, "Merge Error", pageID, err.Error())
+			c.profiler.EmitError("Merge Error", pageID, err.Error())
 			return err
 		}
 
 		// Emit CONTEXT_MERGE event if merge happened
-		if mergeStepName != "" && c.profiler != nil {
-			event := newProfilerEvent(EVENT_CONTEXT_MERGE, "Context Merge", pageID, exec.step)
-
+		if mergeStepName != "" && c.profiler.Enabled() {
 			// Determine merge rule and target context
 			mergeRule := ""
 			currentContextKey := exec.currentContext.key
@@ -673,72 +596,34 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				targetContextKey = exec.step.MergeWithContext.Name
 			}
 
-			// Capture data after merge with mutex protection
-			c.mergeMutex.Lock()
-			dataAfter := copyDataSafe(exec.currentContext.Data)
-			c.mergeMutex.Unlock()
+			dataAfter := c.profiler.CaptureContextDataAfter(exec.currentContext)
 
-			event.Data = map[string]any{
-				"currentContextKey":   currentContextKey,
-				"targetContextKey":    targetContextKey,
-				"mergeRule":           mergeRule,
-				"targetContextBefore": dataBefore,
-				"targetContextAfter":  dataAfter,
-				"fullContextMap":      c.serializeContextMapSafe(exec.contextMap),
-				// TODO: Add diff computation
-			}
-			c.profiler <- event
+			c.profiler.EmitContextMerge(pageID, exec.step, MergeEventData{
+				CurrentContextKey:   currentContextKey,
+				TargetContextKey:    targetContextKey,
+				MergeRule:           mergeRule,
+				TargetContextBefore: dataBefore,
+				TargetContextAfter:  dataAfter,
+				ContextMap:          exec.contextMap,
+			})
 		}
 
 		// Handle streaming at root level
 		if exec.currentContext.depth == 0 && c.Config.Stream {
 			array_data := exec.currentContext.Data.([]interface{})
-			for _, d := range array_data {
+			for i, d := range array_data {
 				c.DataStream <- d
-
-				// Emit STREAM_RESULT event
-				if c.profiler != nil {
-					streamEvent := newProfilerEvent(EVENT_STREAM_RESULT, "Stream Result", pageID, exec.step)
-					streamEvent.Data = map[string]any{
-						"entity": copyDataSafe(d),
-						"index":  len(array_data),
-					}
-					c.profiler <- streamEvent
-				}
+				c.profiler.EmitStreamResult(pageID, exec.step, d, i)
 			}
 			exec.currentContext.Data = []interface{}{}
 		}
 
-		// Emit REQUEST_PAGE_END event (reuse START event ID)
-		if c.profiler != nil && pageID != "" {
-			event := StepProfilerData{
-				ID:        pageID, // Reuse START event ID
-				ParentID:  stepID,
-				Type:      EVENT_REQUEST_PAGE_END,
-				Name:      fmt.Sprintf("Page %d End", pageNum),
-				Step:      exec.step,
-				Timestamp: time.Now(),
-				Duration:  time.Since(pageStartTime).Milliseconds(),
-				Data:      make(map[string]any),
-			}
-			c.profiler <- event
-		}
+		// Emit REQUEST_PAGE_END event
+		c.profiler.EmitRequestPageEnd(pageID, stepID, exec.step, pageNum, pageStartTime)
 	}
 
-	// Emit REQUEST_STEP_END event (reuse START event ID)
-	if c.profiler != nil && stepID != "" {
-		event := StepProfilerData{
-			ID:        stepID, // Reuse START event ID
-			ParentID:  exec.parentID,
-			Type:      EVENT_REQUEST_STEP_END,
-			Name:      exec.step.Name + " End",
-			Step:      exec.step,
-			Timestamp: time.Now(),
-			Duration:  time.Since(stepStartTime).Milliseconds(),
-			Data:      make(map[string]any),
-		}
-		c.profiler <- event
-	}
+	// Emit REQUEST_STEP_END event
+	c.profiler.EmitRequestStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
 
 	return nil
 }
@@ -749,7 +634,6 @@ func (c *ApiCrawler) executeForEachIteration(
 	index int,
 	item any,
 	exec *stepExecution,
-	profilerEnabled bool,
 	stepID string,
 	workerID int,
 	workerPoolID string,
@@ -764,31 +648,10 @@ func (c *ApiCrawler) executeForEachIteration(
 	childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
 
 	// Emit CONTEXT_SELECTION event with worker tracking (context created for iteration)
-	if c.profiler != nil {
-		event := newProfilerEventWithWorker(EVENT_CONTEXT_SELECTION, "Context Selection", stepID, exec.step, workerID, workerPoolID)
-		contextPath := buildContextPath(childContextMap, exec.step.As)
-		event.Data = map[string]any{
-			"contextPath":        contextPath,
-			"currentContextKey":  exec.step.As,
-			"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-			"fullContextMap":     c.serializeContextMapSafe(childContextMap),
-		}
-		c.profiler <- event
-	}
+	c.profiler.EmitContextSelectionWithWorker(stepID, exec.step, exec.step.As, childContextMap, workerID, workerPoolID)
 
 	// Emit ITEM_SELECTION event with worker tracking
-	var itemID string
-	if c.profiler != nil {
-		event := newProfilerEventWithWorker(EVENT_ITEM_SELECTION, fmt.Sprintf("Item %d", index), stepID, exec.step, workerID, workerPoolID)
-		event.Data = map[string]any{
-			"iterationIndex":     index,
-			"itemValue":          copyDataSafe(item),
-			"currentContextKey":  exec.step.As,
-			"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-		}
-		c.profiler <- event
-		itemID = event.ID
-	}
+	itemID := c.profiler.EmitItemSelectionWithWorker(stepID, exec.step, index, item, exec.step.As, childContextMap[exec.step.As].Data, workerID, workerPoolID)
 
 	// Execute nested steps
 	for _, nested := range exec.step.Steps {
@@ -813,7 +676,7 @@ func (c *ApiCrawler) executeForEachParallel(
 	rateLimiter *rate.Limiter,
 	stepID string,
 ) ([]interface{}, error) {
-	profilerEnabled := c.profiler != nil
+	profilerEnabled := c.profiler.Enabled()
 	numItems := len(items)
 
 	// Results channel sized to hold all results
@@ -854,7 +717,7 @@ func (c *ApiCrawler) executeForEachParallel(
 
 			// Execute iteration
 			workerPoolID := stepID + "-pool"
-			result := c.executeForEachIteration(ctx, index, item, exec, profilerEnabled, stepID, threadID, workerPoolID)
+			result := c.executeForEachIteration(ctx, index, item, exec, stepID, threadID, workerPoolID)
 			result.threadID = threadID
 			resultsChan <- result
 		}(i, item, i%maxConcurrency)
@@ -879,7 +742,7 @@ func (c *ApiCrawler) executeForEachParallel(
 	if profilerEnabled {
 		for _, result := range results {
 			for _, event := range result.profilerEvents {
-				c.profiler <- event
+				c.profiler.emit(event)
 			}
 		}
 	}
@@ -898,16 +761,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 	// Emit FOREACH_STEP_START event
 	stepStartTime := time.Now()
-	var stepID string
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_FOREACH_STEP_START, exec.step.Name, exec.parentID, exec.step)
-		event.Data = map[string]any{
-			"stepName":   exec.step.Name,
-			"stepConfig": exec.step,
-		}
-		c.profiler <- event
-		stepID = event.ID
-	}
+	stepID := c.profiler.EmitForEachStepStart(exec.step, exec.parentID)
 
 	results := []interface{}{}
 
@@ -917,7 +771,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 		code, err := c.getOrCompileJQRule(exec.step.Path)
 		if err != nil {
-			emitProfilerError(c.profiler, "Path Extraction Error", stepID, err.Error())
+			c.profiler.EmitError("Path Extraction Error", stepID, err.Error())
 			return fmt.Errorf("failed to get/compile jq path: %w", err)
 		}
 
@@ -963,24 +817,27 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		}
 
 		// Emit PARALLELISM_SETUP event
-		if c.profiler != nil {
+		if c.profiler.Enabled() {
 			workerPoolID := stepID + "-pool"
 			workerIDs := make([]int, maxConcurrency)
 			for i := 0; i < maxConcurrency; i++ {
 				workerIDs[i] = i
 			}
 
-			event := newProfilerEvent(EVENT_PARALLELISM_SETUP, "Parallelism Setup", stepID, exec.step)
-			event.Data = map[string]any{
-				"maxConcurrency": maxConcurrency,
-				"workerPoolId":   workerPoolID,
-				"workerIds":      workerIDs,
-			}
+			var rateLimit float64
+			var burst int
 			if rateLimiter != nil {
-				event.Data["rateLimit"] = exec.step.Parallelism.RequestsPerSecond
-				event.Data["burst"] = exec.step.Parallelism.Burst
+				rateLimit = exec.step.Parallelism.RequestsPerSecond
+				burst = exec.step.Parallelism.Burst
 			}
-			c.profiler <- event
+
+			c.profiler.EmitParallelismSetup(stepID, exec.step, ParallelismSetupData{
+				MaxConcurrency: maxConcurrency,
+				WorkerPoolID:   workerPoolID,
+				WorkerIDs:      workerIDs,
+				RateLimit:      rateLimit,
+				Burst:          burst,
+			})
 		}
 
 		c.logger.Info("[ForEach] Executing %d iterations in parallel (max concurrency: %d)", len(results), maxConcurrency)
@@ -1006,31 +863,10 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
 
 			// Emit CONTEXT_SELECTION event (context created for iteration)
-			if c.profiler != nil {
-				event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", stepID, exec.step)
-				contextPath := buildContextPath(childContextMap, exec.step.As)
-				event.Data = map[string]any{
-					"contextPath":        contextPath,
-					"currentContextKey":  exec.step.As,
-					"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-					"fullContextMap":     c.serializeContextMapSafe(childContextMap),
-				}
-				c.profiler <- event
-			}
+			c.profiler.EmitContextSelection(stepID, exec.step, exec.step.As, childContextMap)
 
 			// Emit ITEM_SELECTION event
-			var itemID string
-			if c.profiler != nil {
-				event := newProfilerEvent(EVENT_ITEM_SELECTION, fmt.Sprintf("Item %d", i), stepID, exec.step)
-				event.Data = map[string]any{
-					"iterationIndex":     i,
-					"itemValue":          copyDataSafe(item),
-					"currentContextKey":  exec.step.As,
-					"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-				}
-				c.profiler <- event
-				itemID = event.ID
-			}
+			itemID := c.profiler.EmitItemSelection(stepID, exec.step, i, item, exec.step.As, childContextMap[exec.step.As].Data)
 
 			for _, nested := range exec.step.Steps {
 				newExec := newStepExecution(nested, exec.step.As, childContextMap, itemID)
@@ -1061,7 +897,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 		_, err := c.performMerge(mergeOp)
 		if err != nil {
-			emitProfilerError(c.profiler, "Merge Error", stepID, err.Error())
+			c.profiler.EmitError("Merge Error", stepID, err.Error())
 			return err
 		}
 
@@ -1069,7 +905,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		// Default: patch the array at exec.step.Path with new results
 		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
 		if err != nil {
-			emitProfilerError(c.profiler, "Merge Error", stepID, err.Error())
+			c.profiler.EmitError("Merge Error", stepID, err.Error())
 			return fmt.Errorf("failed to get/compile merge rule: %w", err)
 		}
 
@@ -1091,36 +927,15 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	// Handle streaming at root level
 	if exec.currentContext.depth <= 1 && c.Config.Stream {
 		array_data := exec.currentContext.Data.([]interface{})
-		for _, d := range array_data {
+		for i, d := range array_data {
 			c.DataStream <- d
-
-			// Emit STREAM_RESULT event
-			if c.profiler != nil {
-				streamEvent := newProfilerEvent(EVENT_STREAM_RESULT, "Stream Result", stepID, exec.step)
-				streamEvent.Data = map[string]any{
-					"entity": copyDataSafe(d),
-					"index":  len(array_data),
-				}
-				c.profiler <- streamEvent
-			}
+			c.profiler.EmitStreamResult(stepID, exec.step, d, i)
 		}
 		exec.currentContext.Data = []interface{}{}
 	}
 
-	// Emit FOREACH_STEP_END event (reuse START event ID)
-	if c.profiler != nil && stepID != "" {
-		event := StepProfilerData{
-			ID:        stepID, // Reuse START event ID
-			ParentID:  exec.parentID,
-			Type:      EVENT_FOREACH_STEP_END,
-			Name:      exec.step.Name + " End",
-			Step:      exec.step,
-			Timestamp: time.Now(),
-			Duration:  time.Since(stepStartTime).Milliseconds(),
-			Data:      make(map[string]any),
-		}
-		c.profiler <- event
-	}
+	// Emit FOREACH_STEP_END event
+	c.profiler.EmitForEachStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
 
 	return nil
 }
@@ -1136,17 +951,7 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 
 	// Emit FORVALUES_STEP_START event
 	stepStartTime := time.Now()
-	var stepID string
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_FORVALUES_STEP_START, exec.step.Name, exec.parentID, exec.step)
-		event.Data = map[string]any{
-			"stepName":   exec.step.Name,
-			"stepConfig": exec.step,
-			"values":     exec.step.Values,
-		}
-		c.profiler <- event
-		stepID = event.ID
-	}
+	stepID := c.profiler.EmitForValuesStepStart(exec.step, exec.parentID)
 
 	// Iterate over values
 	for i, value := range exec.step.Values {
@@ -1164,30 +969,10 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 		childContextMap := childMapWithOverlay(exec.contextMap, exec.currentContext, exec.step.As, value)
 
 		// Emit CONTEXT_SELECTION event
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", stepID, exec.step)
-			contextPath := buildContextPath(childContextMap, exec.step.As)
-			event.Data = map[string]any{
-				"contextPath":        contextPath,
-				"currentContextKey":  exec.step.As,
-				"currentContextData": copyDataSafe(value),
-				"fullContextMap":     c.serializeContextMapSafe(childContextMap),
-			}
-			c.profiler <- event
-		}
+		c.profiler.EmitContextSelection(stepID, exec.step, exec.step.As, childContextMap)
 
-		// Emit ITEM_SELECTION event
-		var itemID string
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_ITEM_SELECTION, fmt.Sprintf("Value %d", i), stepID, exec.step)
-			event.Data = map[string]any{
-				"iterationIndex":    i,
-				"itemValue":         copyDataSafe(value),
-				"currentContextKey": exec.step.As,
-			}
-			c.profiler <- event
-			itemID = event.ID
-		}
+		// Emit ITEM_SELECTION event (for forValues, use value selection)
+		itemID := c.profiler.EmitValueSelection(stepID, exec.step, i, value, exec.step.As)
 
 		// Execute nested steps with overlay context
 		// Nested steps operate in parent context but have access to the value via 'as' key
@@ -1200,19 +985,7 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 	}
 
 	// Emit FORVALUES_STEP_END event
-	if c.profiler != nil && stepID != "" {
-		event := StepProfilerData{
-			ID:        stepID,
-			ParentID:  exec.parentID,
-			Type:      EVENT_FORVALUES_STEP_END,
-			Name:      exec.step.Name + " End",
-			Step:      exec.step,
-			Timestamp: time.Now(),
-			Duration:  time.Since(stepStartTime).Milliseconds(),
-			Data:      make(map[string]any),
-		}
-		c.profiler <- event
-	}
+	c.profiler.EmitForValuesStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
 
 	return nil
 }
@@ -1562,29 +1335,4 @@ func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
 	}
 
 	return result
-}
-
-// copyDataSafe creates a safe copy of data for profiler events (non-JSON approach)
-func copyDataSafe(v interface{}) interface{} {
-	if v == nil {
-		return nil
-	}
-
-	switch val := v.(type) {
-	case []interface{}:
-		copy := make([]interface{}, len(val))
-		for i, item := range val {
-			copy[i] = copyDataSafe(item)
-		}
-		return copy
-	case map[string]any:
-		copy := make(map[string]any, len(val))
-		for k, item := range val {
-			copy[k] = copyDataSafe(item)
-		}
-		return copy
-	default:
-		// Primitives and other types are safe to share
-		return v
-	}
 }
