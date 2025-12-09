@@ -1,17 +1,24 @@
-rootContext: []
+# Test: Simple parallel execution with forEach
+# Demonstrates: parallel execution with worker pool, maxConcurrency setting
+
+# Start with array of values to iterate over
+rootContext: [1, 2, 3, 4, 5]
 
 steps:
   - type: forEach
     path: .
     as: id
-    parallel: true
-    maxConcurrency: 3
-    values: [1, 2, 3, 4, 5]
+    # Parallel execution configuration
+    parallelism:
+      # Maximum 3 concurrent workers executing iterations
+      maxConcurrency: 3
     steps:
       - type: request
         name: Get Item
         request:
-          url: "https://api.example.com/items/{{ .id.value }}"
+          # Template uses current iteration value (id is the value from root array)
+          url: "https://api.example.com/items/{{ .id }}"
           method: GET
         resultTransformer: .
+        # Replace current iteration context with result
         mergeOn: ". = $res"

@@ -1,19 +1,31 @@
+# Test: Streaming with forValues iteration
+# Demonstrates: stream mode emits entities incrementally as they're processed
+
+# Start with empty array (root context must be array for streaming)
 rootContext: []
+# Stream mode: emit entities as they complete instead of waiting for all results
 stream: true
-  
+
 steps:
-  - type: forEach
-    path: "."
+  - type: forValues
+    name: Iterate facility IDs
+    # Static array of values to iterate over
     values: [1, 2]
+    # Each value is accessible directly as .id (no .value wrapper with forValues)
     as: id
-      
+
     steps:
       - type: request
         name: Get Facility Free Places
         request:
-          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id.value }}
+          # Request for each iteration value - access directly via .id
+          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id }}
           method: GET
           headers:
             Accept: application/json
+        # Extract free places from response
         resultTransformer: '.FreePlaces'
-        mergeOn:  . = $res
+        # Append result to root array - in stream mode, this entity will be emitted immediately
+        mergeWithContext:
+          name: root
+          rule: ". += [$res]"

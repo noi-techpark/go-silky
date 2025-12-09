@@ -1,3 +1,7 @@
+# Test: POST request with JSON body
+# Demonstrates: Content-Type header, request body encoding, array appending with mergeOn
+
+# Initialize root context with results array
 rootContext:
   results: []
 
@@ -8,8 +12,13 @@ steps:
       url: https://api.example.com/users
       method: POST
       headers:
+        # IMPORTANT: Content-Type must be specified for POST with body
+        # This tells ApiGorowler to JSON-encode the body
         Content-Type: application/json
+      # Request body - will be automatically JSON-encoded
       body:
         username: testuser
         email: test@example.com
+    # Append response to results array using += operator
+    # $res contains the API response
     mergeOn: .results += [$res]

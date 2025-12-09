@@ -1,0 +1,6 @@
+{
+  "sensors": [
+    {"id": "sensor-101", "name": "Temperature Sensor A", "type": "temp"},
+    {"id": "sensor-102", "name": "Humidity Sensor B", "type": "humidity"}
+  ]
+}

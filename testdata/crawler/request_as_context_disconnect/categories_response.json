@@ -1,0 +1,6 @@
+{
+  "categories": [
+    {"id": "cat-e1", "name": "Laptops", "type": "electronics"},
+    {"id": "cat-e2", "name": "Phones", "type": "electronics"}
+  ]
+}

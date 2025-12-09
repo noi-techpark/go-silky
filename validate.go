@@ -175,18 +175,42 @@ func validateStep(step Step, location string) []ValidationError {
 	var errs []ValidationError
 
 	t := strings.ToLower(step.Type)
-	if t != "foreach" && t != "request" {
-		errs = append(errs, ValidationError{fmt.Sprintf("step.type must be 'foreach' or 'request', got '%s'", step.Type), location + ".type"})
+	if t != "foreach" && t != "request" && t != "forvalues" {
+		errs = append(errs, ValidationError{fmt.Sprintf("step.type must be 'foreach', 'forValues', or 'request', got '%s'", step.Type), location + ".type"})
 		return errs
 	}
 
-	if t == "foreach" {
-		// foreach rules
-		if step.Path == "" {
-			errs = append(errs, ValidationError{"foreach step requires path", location + ".path"})
+	if t == "forvalues" {
+		// forValues rules - only accepts literal values, no path
+		if len(step.Values) == 0 {
+			errs = append(errs, ValidationError{"forValues step requires values", location + ".values"})
+		}
+		if step.Path != "" {
+			errs = append(errs, ValidationError{"forValues step does not accept path (use forEach for path-based iteration)", location + ".path"})
 		}
 		if step.As == "" {
-			errs = append(errs, ValidationError{"foreach step requires as", location + ".as"})
+			errs = append(errs, ValidationError{"forValues step requires as", location + ".as"})
+		}
+		// forValues does not support merge options - it's an overlay, not a transform
+		if step.MergeOn != "" || step.MergeWithParentOn != "" || step.MergeWithContext != nil || step.NoopMerge {
+			errs = append(errs, ValidationError{"forValues step does not support merge options (nested steps handle merging)", location})
+		}
+		// forValues does not support parallelism (yet)
+		if step.Parallelism != nil {
+			errs = append(errs, ValidationError{"forValues step does not support parallelism", location + ".parallelism"})
+		}
+		// Validate nested steps
+		for i, nested := range step.Steps {
+			errs = append(errs, validateStep(nested, fmt.Sprintf("%s.steps[%d]", location, i))...)
+		}
+		return errs
+	} else if t == "foreach" {
+		// foreach rules - requires path for data extraction
+		if step.Path == "" {
+			errs = append(errs, ValidationError{"forEach step requires path", location + ".path"})
+		}
+		if step.As == "" {
+			errs = append(errs, ValidationError{"forEach step requires as", location + ".as"})
 		}
 		// if len(step.Steps) == 0 {
 		// 	errs = append(errs, ValidationError{"foreach step requires nested steps", location + ".steps"})
@@ -214,6 +238,11 @@ func validateStep(step Step, location string) []ValidationError {
 		}
 		errs = append(errs, validateRequest(*step.Request, location+".request")...)
 
+		// request steps do not support 'as' - use forValues for context overlay
+		if step.As != "" {
+			errs = append(errs, ValidationError{"request step does not support 'as' (use forValues for context overlay)", location + ".as"})
+		}
+
 		// Validate nested steps if any
 		for i, nested := range step.Steps {
 			errs = append(errs, validateStep(nested, fmt.Sprintf("%s.steps[%d]", location, i))...)
@@ -228,7 +257,28 @@ func validateStep(step Step, location string) []ValidationError {
 		// could validate jq here with gojq.Parse(step.MergeWithParentOn)
 	}
 
-	// Validate noopMerge doesn't conflict with other merge options
+	// Validate that merge options are mutually exclusive
+	mergeOptionCount := 0
+	if step.MergeOn != "" {
+		mergeOptionCount++
+	}
+	if step.MergeWithParentOn != "" {
+		mergeOptionCount++
+	}
+	if step.MergeWithContext != nil {
+		mergeOptionCount++
+	}
+	if step.NoopMerge {
+		mergeOptionCount++
+	}
+	if mergeOptionCount > 1 {
+		errs = append(errs, ValidationError{
+			"only one merge option can be specified: mergeOn, mergeWithParentOn, mergeWithContext, or noopMerge",
+			location,
+		})
+	}
+
+	// Validate noopMerge doesn't conflict with other merge options (redundant with above but keeping for clarity)
 	if step.NoopMerge {
 		conflictCount := 0
 		if step.MergeOn != "" {

@@ -1,0 +1,6 @@
+{
+  "products": [
+    {"id": "prod-1", "name": "Dell XPS", "price": 1299},
+    {"id": "prod-2", "name": "MacBook Pro", "price": 2499}
+  ]
+}

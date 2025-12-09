@@ -1,0 +1,26 @@
+# Test: Nested forValues (matrix-style iteration)
+# Demonstrates nested forValues to create a matrix of combinations
+# Inner steps can access both outer and inner values
+
+rootContext: {}
+
+steps:
+  - type: forValues
+    name: "Iterate over regions"
+    values: ["eu", "us"]
+    as: region
+    steps:
+      - type: forValues
+        name: "Iterate over environments"
+        values: ["prod", "staging"]
+        as: env
+        steps:
+          - type: request
+            name: "Fetch config"
+            request:
+              # Access both outer (region) and inner (env) values
+              url: "https://api.example.com/config?region={{ .region }}&env={{ .env }}"
+              method: GET
+            resultTransformer: .config
+            # Create nested structure: { "eu": { "prod": {...}, "staging": {...} }, ... }
+            mergeOn: .[$ctx.region][$ctx.env] = $res

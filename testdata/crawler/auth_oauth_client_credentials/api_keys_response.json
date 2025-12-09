@@ -1,0 +1,6 @@
+{
+  "apiKeys": [
+    {"id": "key-1", "name": "Production Key", "created": "2024-01-01"},
+    {"id": "key-2", "name": "Development Key", "created": "2024-02-01"}
+  ]
+}

@@ -49,7 +49,11 @@ const (
 	EVENT_FOREACH_STEP_START
 	EVENT_FOREACH_STEP_END
 
-	// ForEach step sub-events
+	// ForValues step container
+	EVENT_FORVALUES_STEP_START
+	EVENT_FORVALUES_STEP_END
+
+	// ForEach/ForValues step sub-events
 	EVENT_PARALLELISM_SETUP
 	EVENT_ITEM_SELECTION
 
@@ -244,7 +248,30 @@ func (l *stdLogger) Error(msg string, args ...any) {
 	l.logger.Println("[ERROR]", fmt.Sprintf(msg, args...)+"\n")
 }
 
-const RES_KEY = "$res"
+type noopLogger struct {
+	logger *log.Logger
+}
+
+func NewNoopLogger() Logger {
+	return &noopLogger{
+		logger: log.New(os.Stdout, "", log.LstdFlags),
+	}
+}
+
+func (l *noopLogger) Info(msg string, args ...any) {
+}
+
+func (l *noopLogger) Debug(msg string, args ...any) {
+}
+
+func (l *noopLogger) Warning(msg string, args ...any) {
+}
+
+func (l *noopLogger) Error(msg string, args ...any) {
+}
+
+const JQ_RES_KEY = "$res"
+const JQ_CTX_KEY = "$ctx"
 
 type ParallelismConfig struct {
 	MaxConcurrency    int     `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
@@ -372,7 +399,7 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		httpClient:    http.DefaultClient,
 		Config:        cfg,
 		ContextMap:    map[string]*Context{},
-		logger:        NewDefaultLogger(),
+		logger:        NewNoopLogger(),
 		profiler:      nil,
 		templateCache: make(map[string]*template.Template),
 		jqCache:       make(map[string]*gojq.Code),
@@ -527,6 +554,8 @@ func (c *ApiCrawler) ExecuteStep(ctx context.Context, exec *stepExecution) error
 		return c.handleRequest(ctx, exec)
 	case "forEach":
 		return c.handleForEach(ctx, exec)
+	case "forValues":
+		return c.handleForValues(ctx, exec)
 	default:
 		return fmt.Errorf("unknown step type: %s", exec.step.Type)
 	}
@@ -808,37 +837,35 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		}
 
 		// Execute nested steps on transformed result
-		var childContextMap map[string]*Context = nil
-		thisContextKey := exec.currentContextKey
-		if exec.step.As != "" {
-			thisContextKey = exec.step.As
-			childContextMap = childMapWith(exec.contextMap, exec.currentContext, thisContextKey, transformed)
-		} else {
-			childContextMap = childMapWithClonedContext(exec.contextMap, exec.currentContext, transformed)
-		}
+		// Note: request steps create a working context for the response data.
+		// If the current context is canonical (like "root"), the working context
+		// uses a unique key to avoid shadowing the original.
+		cloneResult := childMapWithClonedContext(exec.contextMap, exec.currentContext, transformed, c.ContextMap)
+		childContextMap := cloneResult.contextMap
+		workingContextKey := cloneResult.workingKey
 
 		// Emit CONTEXT_SELECTION event (context created for nested steps)
 		if c.profiler != nil && len(exec.step.Steps) > 0 {
 			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", pageID, exec.step)
-			contextPath := buildContextPath(childContextMap, thisContextKey)
+			contextPath := buildContextPath(childContextMap, workingContextKey)
 			event.Data = map[string]any{
 				"contextPath":        contextPath,
-				"currentContextKey":  thisContextKey,
-				"currentContextData": copyDataSafe(childContextMap[thisContextKey].Data),
+				"currentContextKey":  workingContextKey,
+				"currentContextData": copyDataSafe(childContextMap[workingContextKey].Data),
 				"fullContextMap":     c.serializeContextMapSafe(childContextMap),
 			}
 			c.profiler <- event
 		}
 
 		for _, step := range exec.step.Steps {
-			newExec := newStepExecution(step, thisContextKey, childContextMap, pageID)
+			newExec := newStepExecution(step, workingContextKey, childContextMap, pageID)
 			if err := c.ExecuteStep(ctx, newExec); err != nil {
 				return err
 			}
 		}
 
-		// Get final result after nested steps
-		transformed = childContextMap[thisContextKey].Data
+		// Get final result after nested steps from the working context
+		transformed = childContextMap[workingContextKey].Data
 
 		// Apply merge strategy
 		mergeOp := mergeOperation{
@@ -1120,8 +1147,8 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 	results := []interface{}{}
 
-	// Extract items to iterate over
-	if len(exec.step.Path) != 0 && exec.step.Values == nil {
+	// Extract items to iterate over from path (forEach always uses path, validation ensures this)
+	if len(exec.step.Path) != 0 {
 		c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
 
 		code, err := c.getOrCompileJQRule(exec.step.Path)
@@ -1147,12 +1174,6 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 			if arr, ok := results[0].([]interface{}); ok {
 				results = arr
 			}
-		}
-	} else if exec.step.Values != nil {
-		c.logger.Debug("[Foreach] using values over path: %s, values %+v", exec.step.Path, exec.step.Values)
-
-		for _, v := range exec.step.Values {
-			results = append(results, map[string]interface{}{"value": v})
 		}
 	}
 
@@ -1280,7 +1301,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 			return err
 		}
 
-	} else {
+	} else /*if exec.step.Path != ""*/ {
 		// Default: patch the array at exec.step.Path with new results
 		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
 		if err != nil {
@@ -1300,6 +1321,8 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 		exec.currentContext.Data = v
 	}
+	// If Path is empty (using values) and no custom merge, skip merge
+	// The nested steps are expected to handle merging
 
 	// Handle streaming at root level
 	if exec.currentContext.depth <= 1 && c.Config.Stream {
@@ -1338,9 +1361,101 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	return nil
 }
 
+// handleForValues iterates over literal values and creates an overlay context for each.
+// Unlike forEach, forValues:
+// - Only accepts literal values (no path extraction)
+// - Creates overlay context (value assigned directly to 'as' key, no .value wrapper)
+// - Does NOT merge results back - nested steps handle their own merging
+// - Preserves parent context accessibility
+func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) error {
+	c.logger.Info("[ForValues] Preparing %s", exec.step.Name)
+
+	// Emit FORVALUES_STEP_START event
+	stepStartTime := time.Now()
+	var stepID string
+	if c.profiler != nil {
+		event := newProfilerEvent(EVENT_FORVALUES_STEP_START, exec.step.Name, exec.parentID, exec.step)
+		event.Data = map[string]any{
+			"stepName":   exec.step.Name,
+			"stepConfig": exec.step,
+			"values":     exec.step.Values,
+		}
+		c.profiler <- event
+		stepID = event.ID
+	}
+
+	// Iterate over values
+	for i, value := range exec.step.Values {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		c.logger.Info("[ForValues] Iteration %d as '%s' = %v", i, exec.step.As, value)
+
+		// Create overlay context map - value is assigned directly (no .value wrapper)
+		// This preserves parent context while adding the new value
+		childContextMap := childMapWithOverlay(exec.contextMap, exec.currentContext, exec.step.As, value)
+
+		// Emit CONTEXT_SELECTION event
+		if c.profiler != nil {
+			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", stepID, exec.step)
+			contextPath := buildContextPath(childContextMap, exec.step.As)
+			event.Data = map[string]any{
+				"contextPath":        contextPath,
+				"currentContextKey":  exec.step.As,
+				"currentContextData": copyDataSafe(value),
+				"fullContextMap":     c.serializeContextMapSafe(childContextMap),
+			}
+			c.profiler <- event
+		}
+
+		// Emit ITEM_SELECTION event
+		var itemID string
+		if c.profiler != nil {
+			event := newProfilerEvent(EVENT_ITEM_SELECTION, fmt.Sprintf("Value %d", i), stepID, exec.step)
+			event.Data = map[string]any{
+				"iterationIndex":    i,
+				"value":             copyDataSafe(value),
+				"currentContextKey": exec.step.As,
+			}
+			c.profiler <- event
+			itemID = event.ID
+		}
+
+		// Execute nested steps with overlay context
+		// Nested steps operate in parent context but have access to the value via 'as' key
+		for _, nested := range exec.step.Steps {
+			newExec := newStepExecution(nested, exec.currentContextKey, childContextMap, itemID)
+			if err := c.ExecuteStep(ctx, newExec); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Emit FORVALUES_STEP_END event
+	if c.profiler != nil && stepID != "" {
+		event := StepProfilerData{
+			ID:        stepID,
+			ParentID:  exec.parentID,
+			Type:      EVENT_FORVALUES_STEP_END,
+			Name:      exec.step.Name + " End",
+			Step:      exec.step,
+			Timestamp: time.Now(),
+			Duration:  time.Since(stepStartTime).Milliseconds(),
+			Data:      make(map[string]any),
+		}
+		c.profiler <- event
+	}
+
+	return nil
+}
+
 func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, templateCtx map[string]any) (interface{}, error) {
 	// Parse the JQ expression
-	code, err := c.getOrCompileJQRule(rule, "$res", "$ctx")
+	code, err := c.getOrCompileJQRule(rule, JQ_RES_KEY, JQ_CTX_KEY)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
 	}
@@ -1407,6 +1522,9 @@ func (c *ApiCrawler) performMerge(op mergeOperation) (profilerStepName string, e
 	}
 
 	// 3. Named context merge (cross-scope update)
+	// Note: Since childMapWithClonedContext now uses unique working keys for
+	// canonical contexts (like "root"), the original canonical contexts are
+	// preserved in the context map and can be found by name.
 	if op.step.MergeWithContext != nil {
 		c.logger.Debug("[Merge] merging-with-context with expression: %s:%s",
 			op.step.MergeWithContext.Name, op.step.MergeWithContext.Rule)
@@ -1544,7 +1662,7 @@ func (c *ApiCrawler) transformResult(raw any, transformer string, templateCtx ma
 
 	c.logger.Debug("[Transform] transforming with expression: %s", transformer)
 
-	code, err := c.getOrCompileJQRule(transformer, "$ctx")
+	code, err := c.getOrCompileJQRule(transformer, JQ_CTX_KEY)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/compile transform rule: %w", err)
 	}
@@ -1586,39 +1704,99 @@ func childMapWith(base map[string]*Context, currentCotnext *Context, key string,
 	return newMap
 }
 
-func childMapWithClonedContext(base map[string]*Context, currentCotnext *Context, value interface{}) map[string]*Context {
+// childMapWithOverlay creates an overlay context for forValues.
+// Unlike childMapWith, this:
+// - Assigns the value directly (no wrapper)
+// - Keeps the same parent reference (overlay, not child)
+// - Nested steps operate on the PARENT context but have access to the value via 'as' key
+func childMapWithOverlay(base map[string]*Context, currentContext *Context, key string, value interface{}) map[string]*Context {
 	newMap := make(map[string]*Context, len(base)+1)
 	for k, v := range base {
-		// exclude current contex, we will create copy later
-		if k == currentCotnext.key {
-			continue
-		}
 		newMap[k] = v
 	}
-	newMap[currentCotnext.key] = &Context{
-		Data:          value,
-		ParentContext: currentCotnext.ParentContext,
-		key:           currentCotnext.key,
-		depth:         currentCotnext.depth,
+	// Create overlay context - same depth as parent, parent points to parent's parent
+	newMap[key] = &Context{
+		Data:          value, // Value assigned directly, no wrapper
+		ParentContext: currentContext.ParentContext,
+		key:           key,
+		depth:         currentContext.depth, // Same depth - it's an overlay, not a child
 	}
 	return newMap
 }
 
+// clonedContextResult holds the result of cloning a context, including
+// the new context map and the key where the working context was placed
+type clonedContextResult struct {
+	contextMap map[string]*Context
+	workingKey string // The key where the cloned/working context is stored
+}
+
+// childMapWithClonedContext creates a new context map with a cloned working context.
+// If the current context is a canonical context (exists in canonicalMap), the clone
+// is stored under a unique working key to avoid shadowing the original.
+// This ensures that mergeWithContext can always find the original canonical contexts.
+func childMapWithClonedContext(base map[string]*Context, currentContext *Context, value interface{}, canonicalMap map[string]*Context) clonedContextResult {
+	newMap := make(map[string]*Context, len(base)+2)
+
+	// Copy all existing contexts
+	for k, v := range base {
+		newMap[k] = v
+	}
+
+	// Determine the working key - if current context is canonical, use a unique key
+	workingKey := currentContext.key
+	if _, isCanonical := canonicalMap[currentContext.key]; isCanonical {
+		// Create a unique working key that won't shadow the canonical context
+		workingKey = "_response_" + currentContext.key
+	}
+
+	// Create the working context with the response data
+	newMap[workingKey] = &Context{
+		Data:          value,
+		ParentContext: currentContext.key, // Parent is the original context
+		key:           workingKey,
+		depth:         currentContext.depth + 1,
+	}
+
+	return clonedContextResult{
+		contextMap: newMap,
+		workingKey: workingKey,
+	}
+}
+
 func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
 	result := make(map[string]interface{})
-	// root special case
-	if rootMap, ok := base["root"].Data.(map[string]interface{}); ok {
-		for k, v := range rootMap {
-			result[k] = v
+
+	// First pass: add all contexts by their key
+	for k, c := range base {
+		result[k] = c.Data
+	}
+
+	// Second pass: spread map data from special contexts into top level
+	// This allows templates to access fields directly (e.g., {{ .FacilityId }})
+	// Priority: _response_* contexts first (most specific), then root
+	for k, c := range base {
+		// Spread _response_* context data (working contexts from request steps)
+		if len(k) > 10 && k[:10] == "_response_" {
+			if dataMap, ok := c.Data.(map[string]interface{}); ok {
+				for field, v := range dataMap {
+					result[field] = v
+				}
+			}
 		}
 	}
 
-	for k, c := range base {
-		if k == "root" {
-			continue
+	// Finally spread root context data (lowest priority, won't overwrite)
+	if rootCtx, ok := base["root"]; ok {
+		if rootMap, ok := rootCtx.Data.(map[string]interface{}); ok {
+			for k, v := range rootMap {
+				if _, exists := result[k]; !exists {
+					result[k] = v
+				}
+			}
 		}
-		result[k] = c.Data
 	}
+
 	return result
 }
 

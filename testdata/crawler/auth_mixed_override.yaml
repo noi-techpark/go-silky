@@ -1,0 +1,45 @@
+# Test: Mixed Authentication with Per-Request Override
+# This test demonstrates using different auth for different requests
+# Global auth is used by default, but individual requests can override it
+# Useful when crawling multiple APIs with different authentication
+
+rootContext: {}
+
+# Global authentication (used by default)
+auth:
+  type: bearer
+  token: global_bearer_token_abc123
+
+steps:
+  - type: request
+    name: "Get public data (uses global bearer)"
+    request:
+      url: https://api.example.com/public/stats
+      method: GET
+    resultTransformer: .stats
+    mergeOn: .stats = $res
+
+  - type: request
+    name: "Get admin data (overrides with basic auth)"
+    request:
+      url: https://admin.example.com/internal/reports
+      method: GET
+      # Override global auth for this specific request
+      auth:
+        type: basic
+        username: admin
+        password: admin_secret
+    resultTransformer: .reports
+    mergeOn: .reports = $res
+
+  - type: forEach
+    name: "Process each report"
+    path: .reports
+    as: report
+    steps:
+      - type: request
+        name: "Get report details (uses global bearer again)"
+        request:
+          url: https://api.example.com/reports/{{ .report.id }}/details
+          method: GET
+        mergeOn: .details = $res

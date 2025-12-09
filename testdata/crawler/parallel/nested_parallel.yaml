@@ -1,17 +1,20 @@
-rootContext: []
+# Test: Nested parallel forEach execution
+# Demonstrates: parallel execution at multiple nesting levels
+
+# Start with categories to iterate over
+rootContext: ["electronics", "books"]
 
 steps:
   - type: forEach
     path: .
     as: category
-    parallel: true
-    maxConcurrency: 2
-    values: ["electronics", "books"]
+    parallelism:
+      maxConcurrency: 2
     steps:
       - type: request
         name: Get Category Items
         request:
-          url: "https://api.example.com/categories/{{ .category.value }}/items"
+          url: "https://api.example.com/categories/{{ .category }}/items"
           method: GET
         resultTransformer: .items
         mergeOn: ". = $res"
@@ -19,8 +22,8 @@ steps:
           - type: forEach
             path: .
             as: item
-            parallel: true
-            maxConcurrency: 3
+            parallelism:
+              maxConcurrency: 3
             steps:
               - type: request
                 name: Get Item Details

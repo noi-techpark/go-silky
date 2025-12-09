@@ -1,0 +1,6 @@
+{
+  "systems": [
+    {"id": "sys-1", "name": "Production", "status": "active"},
+    {"id": "sys-2", "name": "Staging", "status": "active"}
+  ]
+}

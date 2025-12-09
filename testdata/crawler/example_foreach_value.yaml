@@ -1,18 +1,30 @@
+# Test: forValues with static values
+# Demonstrates: iterating over hardcoded values using forValues step
+
+# Start with empty array - will collect results from forValues iterations
 rootContext: []
-  
+
 steps:
-  - type: forEach
-    path: "."
+  # forValues step with static values (no API call to get the list)
+  - type: forValues
+    name: Iterate facility IDs
+    # Static array of values to iterate over
     values: [1, 2]
+    # Each value is accessible directly as .id (no .value wrapper with forValues)
     as: id
-      
+
     steps:
       - type: request
         name: Get Facility Free Places
         request:
-          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id.value }}
+          # Access static value directly via .id in Go template
+          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id }}
           method: GET
           headers:
             Accept: application/json
+        # Extract FreePlaces from response
         resultTransformer: '.FreePlaces'
-        mergeOn:  . = $res
+        # Append result to root array
+        mergeWithContext:
+          name: root
+          rule: ". += [$res]"

@@ -1,0 +1,8 @@
+{
+  "config": {
+    "region": "eu",
+    "env": "prod",
+    "maxConnections": 100,
+    "timeout": 30
+  }
+}

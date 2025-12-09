@@ -2,16 +2,16 @@
 
 **ApiGorowler** is a declarative, YAML-configured API crawler designed for complex and dynamic API data extraction. It allows developers to describe multi-step API interactions with support for nested operations, data transformations, and context-based processing.
 
-The core functionality of ApiGorowler revolves around two main step types:
+The core functionality of ApiGorowler revolves around three main step types:
 
 * `request`: to perform API calls,
-* `foreach`: to iterate over arrays and dynamically create nested contexts.
+* `forEach`: to iterate over arrays extracted from context data,
+* `forValues`: to iterate over literal values defined in the configuration.
 
-Each step operates in its own **context**, allowing for precise manipulation and isolation of data. Contexts are organized in a hierarchical structure, with each `foreach` step creating new child contexts. This enables fine-grained control of nested operations and data scoping. After execution, results can be merged into parent or ancestor contexts using declarative **merge rules**.
+Each step operates in its own **context**, allowing for precise manipulation and isolation of data. Contexts are organized in a hierarchical structure, with each `forEach` or `forValues` step creating new child contexts. This enables fine-grained control of nested operations and data scoping. After execution, results can be merged into parent or ancestor contexts using declarative **merge rules**.
 
 ApiGorowler also supports:
 
-* Static iteration using `values` in `foreach`
 * Response transformation via `jq` expressions
 * Request templating with Go templates
 * Global and request-level authentication and headers
@@ -49,26 +49,80 @@ ApiGorowler's context system is the foundation of its data processing capabiliti
 
 When the crawler starts, it initializes a **root context** containing the initial data structure (either an empty array `[]` or empty object `{}`). As steps execute:
 
-1. **Request steps** can create a temporary child context when they have nested steps (using the `as` parameter)
-2. **ForEach steps** create a new child context for each iteration, containing the current item being processed
-3. Each context has a unique key and maintains a reference to its parent context
-4. Nested steps operate on the current context, isolated from parent contexts
+1. **ForEach steps** create a new child context for each iteration, extracting items from a path in the current context
+2. **ForValues steps** create an overlay context for each literal value, preserving access to parent context variables
+3. **Request steps** create a working context with the response data; nested steps operate on the response
+4. Each context has a unique key and maintains a reference to its parent context
+5. All ancestor contexts remain accessible via the context map
+
+### Canonical vs Working Contexts
+
+ApiGorowler distinguishes between two types of contexts:
+
+* **Canonical contexts**: Named contexts that persist throughout execution (e.g., "root", contexts created by `forEach` with `as`, contexts created by `forValues` with `as`). These are the targets for `mergeWithContext` operations.
+* **Working contexts**: Temporary contexts created by request steps to hold response data. When a request executes within a canonical context (like "root"), it creates a working context with a `_response_` prefix internally, ensuring the canonical context remains available for merge operations.
+
+This architecture ensures that `mergeWithContext: {name: root}` always merges into the actual root context, not a cloned copy.
+
+### Context Preservation with Request `as`
+
+The `as` parameter on request steps is crucial when you need nested steps to access variables from outer forEach loops:
+
+**Without `as` (context replacement):**
+```yaml
+forEach as: language    # Creates "language" context
+  request               # REPLACES "language" context with response
+    forEach as: item
+      request           # Cannot access .language - it was replaced!
+```
+
+**With `as` (context preservation):**
+```yaml
+forEach as: language    # Creates "language" context
+  request as: data      # Creates NEW "data" context, preserves "language"
+    forEach as: item
+      request           # Can access both .language and .data!
+```
 
 ### Context Variables
 
 Within templates and `jq` expressions, you can reference:
 
-* **Named contexts**: When a step uses `as: "name"`, that context becomes accessible as `.name` in Go templates
+* **Named contexts**: Access any context by its `as` name (e.g., `.language`, `.location`, `.data`) in Go templates
 * **Special variable `$res`**: In merge rules, refers to the result being merged
-* **Special variable `$ctx`**: In transform and merge rules, provides access to the full context map
-* **Parent context data**: When merged, child results update parent context data
+* **Special variable `$ctx`**: In transform and merge rules, provides access to the full context map as an object
+* **Context map access**: Use `$ctx.contextName` to access any named context from jq expressions
+
+### Understanding Parent Context in Merge Operations
+
+It's important to understand what "parent" means for merge operations:
+
+**In forEach steps:** The parent is the context the forEach is executing within. For example:
+```yaml
+rootContext: {items: [{id: 1}, {id: 2}]}
+steps:
+  - type: forEach
+    path: .items
+    as: item
+    steps:
+      - type: request
+        mergeWithParentOn: .result = $res  # Parent is ROOT, not .items!
+```
+Even though forEach operates on `.items` path, the parent context for merge is the **root context**, not the `.items` array.
+
+**In request steps with `as`:** The parent is still the context the request is executing within:
+```yaml
+forEach as: language
+  request as: data
+    mergeWithParentOn: .[$ctx.language.value] = $res  # Parent is "language" context
+```
 
 ### Merge Strategies
 
 After a step executes, its result can be merged back into a context using several strategies:
 
 * **`mergeOn`**: Merge with current context using a jq expression (e.g., `.items = $res`)
-* **`mergeWithParentOn`**: Merge with immediate parent context using a jq expression
+* **`mergeWithParentOn`**: Merge with immediate parent context using a jq expression (see above for what "parent" means)
 * **`mergeWithContext`**: Merge with a named ancestor context (e.g., `{name: "facility", rule: ".details = $res"}`)
 * **`noopMerge: true`**: Skip merging entirely (useful when nested steps handle their own merging)
 * **Default**: If no merge option is specified, arrays are appended and objects are shallow-merged
@@ -180,7 +234,7 @@ rootContext: []
 | `auth`        | [AuthenticationStruct](#authenticationstruct) | Optional. Global authentication configuration.                 |
 | `headers`     | `map[string]string`    | Optional. Global headers applied to all requests.              |
 | `stream`      | `boolean`              | Optional. Enable streaming; requires `rootContext` to be `[]`. |
-| `steps`       | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | **Required.** List of crawler steps. |
+| `steps`       | Array<[ForeachStep](#foreachstep)\|[ForValuesStep](#forvaluesstep)\|[RequestStep](#requeststep)> | **Required.** List of crawler steps. |
 
 ---
 
@@ -383,17 +437,16 @@ auth:
 
 ### ForeachStep
 
-Iterates over an array or list of values, creating a new child context for each item.
+Iterates over an array extracted from the current context, creating a new child context for each item.
 
 | Field               | Type                 | Description                                          |
 | ------------------- | -------------------- | ---------------------------------------------------- |
-| `type`              | string               | **Required.** Must be `foreach`                      |
+| `type`              | string               | **Required.** Must be `forEach`                      |
 | `name`              | string               | Optional name for the step                           |
 | `path`              | jq expression        | **Required.** Path to the array to iterate over      |
-| `as`                | string               | **Required.** Variable name for each item in context |
-| `values`            | array<any>           | Optional. Static values to iterate over. When using values, access current value via `.[ctx-name].value` (see [example](./examples/foreach-iteration.yaml)) |
+| `as`                | string               | **Required.** Context name for each item             |
 | `parallelism`       | [ParallelismConfig](#parallelismconfig) | Optional. Parallel execution configuration |
-| `steps`             | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
+| `steps`             | Array<Step>          | Optional. Nested steps to execute for each item      |
 | `mergeWithParentOn` | jq expression        | Optional. Rule for merging with parent context       |
 | `mergeOn`           | jq expression        | Optional. Rule for merging with current context      |
 | `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule |
@@ -414,6 +467,43 @@ Iterates over an array or list of values, creating a new child context for each 
     - type: request
       # ... fetch user details
 ```
+
+---
+
+### ForValuesStep
+
+Iterates over literal values defined in the configuration, creating an overlay context for each value. Unlike `forEach`, the context variable is set directly to the value (not wrapped in an object).
+
+| Field    | Type          | Description                                          |
+| -------- | ------------- | ---------------------------------------------------- |
+| `type`   | string        | **Required.** Must be `forValues`                    |
+| `name`   | string        | Optional name for the step                           |
+| `values` | array\<any\>  | **Required.** Literal values to iterate over         |
+| `as`     | string        | **Required.** Context name for the current value     |
+| `steps`  | Array<Step>   | Optional. Nested steps to execute for each value     |
+
+**Note:** `forValues` does not support merge options or parallelism. Nested steps handle their own merging. The context variable is accessible directly (e.g., `{{ .language }}` not `{{ .language.value }}`).
+
+**Example:**
+```yaml
+- type: forValues
+  name: Iterate languages
+  values: ["en", "de", "it"]
+  as: language
+  steps:
+    - type: request
+      request:
+        url: "https://api.example.com/data?lang={{ .language }}"
+        method: GET
+      mergeWithContext:
+        name: root
+        rule: ".results += [$res]"
+```
+
+**Use Cases:**
+- Iterating over a predefined set of values (languages, regions, categories)
+- Matrix-style iteration when nested (e.g., regions × tiers)
+- Preserving parent context variables for nested requests
 
 ---
 
@@ -450,13 +540,76 @@ Performs an HTTP request and optionally transforms the response.
 | `name`              | string        | Optional step name                    |
 | `request`           | [RequestStruct](#requeststruct) | **Required.** Request configuration   |
 | `resultTransformer` | jq expression | Optional transformation of the result |
-| `as`                | string        | Optional. Name for the result context (used with nested steps) |
+| `as`                | string        | Optional. Context name for this request's result (see below) |
 | `steps`             | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
 | `mergeWithParentOn` | jq expression | Optional. Rule for merging with parent context |
 | `mergeOn`           | jq expression | Optional. Rule for merging with current context |
 | `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule |
 
 **Note:** Only one of `mergeWithParentOn`, `mergeOn`, or `mergeWithContext` can be specified.
+
+#### Understanding the `as` Property for Requests
+
+The `as` property on request steps creates a **new sibling context** instead of replacing the current context. This is critical when you have nested forEach loops and need inner requests to access outer forEach variables.
+
+**The Problem: Context Replacement**
+
+Without `forValues`, a request **replaces** the current context with its response data:
+
+```yaml
+steps:
+  - type: forValues
+    values: ["en", "de", "it"]
+    as: language                    # Creates "language" overlay context
+    steps:
+      - type: request               # Creates working context with response
+        request:
+          url: "https://api.example.com/data?lang={{ .language }}"
+        steps:
+          - type: forEach
+            path: .items
+            as: item
+            steps:
+              - type: request
+                request:
+                  # With forValues, .language IS accessible here!
+                  url: "https://api.example.com/detail?lang={{ .language }}"
+```
+
+**Alternative: Using forEach with path-based data**
+
+When iterating over data from the context (not literal values), use `forEach`:
+
+```yaml
+steps:
+  - type: forEach
+    path: .languages              # Extract from context data
+    as: language                  # Creates "language" context per item
+    steps:
+      - type: request
+        request:
+          url: "https://api.example.com/locations?lang={{ .language.code }}"
+        steps:
+          - type: forEach
+            path: .
+            as: location
+            steps:
+              - type: request
+                request:
+                  # Access both language and location contexts
+                  url: "https://api.example.com/details?lang={{ .language.code }}&id={{ .location.id }}"
+```
+
+**When to Use `forValues` vs `forEach`:**
+
+1. **`forValues`**: For literal values defined in configuration (languages, regions, categories)
+2. **`forEach`**: For iterating over arrays extracted from context data via `path`
+
+**Key Points:**
+- `forValues` creates an overlay context that preserves parent variables - nested steps can access the value directly (e.g., `{{ .language }}`)
+- `forEach` creates a child context from extracted data - access item properties (e.g., `{{ .language.code }}`)
+- Use `$ctx.contextName` in jq expressions to access any named context
+- Use `mergeWithContext` to merge results into canonical contexts like "root"
 
 ---
 

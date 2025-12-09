@@ -1,0 +1,33 @@
+# Test: Custom Authentication (Cookie to Header)
+# This test demonstrates custom auth: extract a cookie from login response
+# and inject it as a custom header (not as a cookie) in subsequent requests
+# Useful for legacy APIs with non-standard authentication mechanisms
+
+rootContext: {}
+
+# Custom auth: extract from cookie, inject into header
+auth:
+  type: custom
+  loginRequest:
+    url: https://legacy.example.com/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      user: customuser
+      pass: custompass
+  # Extract auth_session cookie
+  extractFrom: cookie
+  extractSelector: auth_session
+  # Inject as custom header
+  injectInto: header
+  injectKey: X-Custom-Session
+  maxAgeSeconds: 3600
+
+steps:
+  - type: request
+    name: "Get legacy system data"
+    request:
+      url: https://legacy.example.com/api/systems
+      method: GET
+    resultTransformer: .systems

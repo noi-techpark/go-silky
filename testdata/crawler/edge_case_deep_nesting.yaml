@@ -1,0 +1,33 @@
+# Edge Case Test: Deep nesting with mergeWithContext to root
+# Tests that deeply nested requests can all merge to the canonical root context
+# without the working contexts interfering.
+
+rootContext: {"items": []}
+
+steps:
+  # Use forValues to preserve level1 context
+  - type: forValues
+    name: Level 1 IDs
+    values: ["L1"]
+    as: level1Id
+    steps:
+      # Use forValues to preserve level2 context
+      - type: forValues
+        name: Level 2 IDs
+        values: ["L2"]
+        as: level2Id
+        steps:
+          - type: request
+            name: Get final data
+            request:
+              url: "https://api.example.com/level3?l1={{ .level1Id }}&l2={{ .level2Id }}"
+              method: GET
+            resultTransformer: |
+              {
+                level1Id: $ctx.level1Id,
+                level2Id: $ctx.level2Id,
+                level3Data: .final
+              }
+            mergeWithContext:
+              name: root
+              rule: ".items += [$res]"

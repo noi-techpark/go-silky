@@ -1,0 +1,29 @@
+# Test: JWT Authentication (Extract from Header)
+# This test extracts JWT token from response header instead of body
+# Some APIs return tokens in custom headers like X-Auth-Token or Authorization
+
+rootContext: []
+
+# JWT auth extracting token from response header
+auth:
+  type: jwt
+  loginRequest:
+    url: https://api.example.com/auth/signin
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      username: headeruser
+      password: headerpass789
+  # Extract from response header
+  extractFrom: header
+  extractSelector: X-Auth-Token
+  maxAgeSeconds: 2400
+
+steps:
+  - type: request
+    name: "List user documents"
+    request:
+      url: https://api.example.com/documents
+      method: GET
+    resultTransformer: .documents

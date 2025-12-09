@@ -1,35 +1,37 @@
-rootContext: {"users": [], "products": []}
+# Test: Multiple parallel forEach steps operating on different root fields
+# Demonstrates: multiple independent parallel operations writing to different parts of root context
+
+# Start with object containing two arrays to iterate over
+rootContext: {"users": [], "products": [], "userIds": [1, 2], "productIds": [101, 102]}
 
 steps:
   - type: forEach
-    path: .
+    path: .userIds
     as: userId
-    parallel: true
-    maxConcurrency: 2
+    parallelism:
+      maxConcurrency: 2
     noopMerge: true
-    values: [1, 2]
     steps:
       - type: request
         name: Get User
         request:
-          url: "https://api.example.com/users/{{ .userId.value }}"
+          url: "https://api.example.com/users/{{ .userId }}"
           method: GET
         mergeWithContext:
           name: root
           rule: ".users += [$res]"
 
   - type: forEach
-    path: .
+    path: .productIds
     as: productId
-    parallel: true
-    maxConcurrency: 2
+    parallelism:
+      maxConcurrency: 2
     noopMerge: true
-    values: [101, 102]
     steps:
       - type: request
         name: Get Product
         request:
-          url: "https://api.example.com/products/{{ .productId.value }}"
+          url: "https://api.example.com/products/{{ .productId }}"
           method: GET
         mergeWithContext:
           name: root

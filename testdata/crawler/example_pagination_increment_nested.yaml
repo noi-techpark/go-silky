@@ -1,6 +1,10 @@
+# Test: Pagination with nested steps (forEach inside paginated request)
+# Demonstrates: combining pagination with nested operations, enriching paginated results
+
+# Start with empty array
 rootContext: []
 stream: false
-  
+
 steps:
   - type: request
     name: Fetch Facilities
@@ -11,6 +15,7 @@ steps:
         Accept: application/json
       body:
 
+      # Pagination: fetch pages 0 and 1
       pagination:
         params:
           - name: offset
@@ -23,6 +28,8 @@ steps:
             param: ".query.offset"
             compare: gt
             value: 1
+    # Nested steps execute for EACH page's result
+    # This allows enriching paginated data before merging
     steps:
       - type: forEach
         path: .
@@ -31,12 +38,16 @@ steps:
           - type: request
             name: Get Facility Free Places
             request:
+              # Nested request for each facility in the current page
               url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .facility.FacilityId }}
               method: GET
               headers:
                 Accept: application/json
+            # Wrap result in array
             resultTransformer: '[.FreePlaces]'
+            # Add FacilityDetails to each facility object
             mergeOn: .FacilityDetails = $res
 
+    # Extract data array from each page after enrichment
     resultTransformer: .data
     

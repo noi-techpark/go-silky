@@ -1,0 +1,59 @@
+# Test: forValues with Dynamic Keys and Nested Context Access
+# This demonstrates using forValues to iterate over literal values
+# and nested requests that can access outer forValues variables.
+#
+# Real-world scenario: Multi-language location data with nested station details
+
+rootContext: {}
+
+steps:
+  # Iterate over language codes using forValues
+  - type: forValues
+    name: "Fetch translations for all languages"
+    values: ["en", "de", "it"]
+    as: language
+    steps:
+      # Request fetches locations for this language
+      # .language is directly accessible (no .value wrapper with forValues)
+      - type: request
+        name: "Get locations in language"
+        request:
+          url: "https://api.locations.com/v1/locations?lang={{ .language }}"
+          method: GET
+        resultTransformer: .locations
+        # Merge into root using language code as dynamic key
+        # This creates: { "en": [...], "de": [...], "it": [...] }
+        mergeOn: .[$ctx.language] = $res
+        steps:
+          # Nested forEach to fetch station details
+          - type: forEach
+            path: .
+            as: location
+            steps:
+              # This request can access .language from outer forValues
+              - type: request
+                name: "Get stations for location"
+                request:
+                  # Can access .language (from forValues) AND .location.id (from forEach)
+                  url: "https://api.locations.com/v1/stations?lang={{ .language }}&locationId={{ .location.id }}"
+                  method: GET
+                resultTransformer: |
+                  .stations | map({
+                    id,
+                    name,
+                    address,
+                    language: $ctx.language,
+                    locationId: $ctx.location.id
+                  })
+                # Add stations to the location in the language-specific array
+                mergeOn: .stations = $res
+
+  # Now use the multi-language translations map
+  - type: request
+    name: "Get user preferences"
+    request:
+      url: "https://api.locations.com/v1/users/me/preferences"
+      method: GET
+    resultTransformer: .preferences
+    # Root context keys are spread into $ctx
+    mergeOn: .availableLanguages = ["en", "de", "it"]

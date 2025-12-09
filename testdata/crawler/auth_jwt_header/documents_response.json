@@ -1,0 +1,6 @@
+{
+  "documents": [
+    {"id": "doc-1", "title": "Report Q1", "size": 1024},
+    {"id": "doc-2", "title": "Report Q2", "size": 2048}
+  ]
+}
