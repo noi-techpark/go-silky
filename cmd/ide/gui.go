@@ -102,6 +102,19 @@ func isEndEvent(t apigorowler.ProfileEventType) bool {
 		t == apigorowler.EVENT_AUTH_LOGIN_END
 }
 
+// hasContextMapData returns true if the event contains context/template map data
+func hasContextMapData(data apigorowler.StepProfilerData) bool {
+	switch data.Type {
+	case apigorowler.EVENT_URL_COMPOSITION:
+		_, ok := data.Data["goTemplateContext"]
+		return ok
+	case apigorowler.EVENT_CONTEXT_SELECTION, apigorowler.EVENT_CONTEXT_MERGE:
+		_, ok := data.Data["fullContextMap"]
+		return ok
+	}
+	return false
+}
+
 func getHelpText() string {
 	return `[yellow::b]ApiGorowler IDE - Keyboard Shortcuts[-:-:-]
 
@@ -127,6 +140,13 @@ func getHelpText() string {
   [yellow]1[-]             Show "Before" data
   [yellow]2[-]             Show "After" data
   [yellow]3[-]             Show "Diff" (word-based)
+
+[green::b]Context Map View[-:-:-]
+  [yellow]m[-]             Open context/template map viewer (when available)
+  [yellow]/[-]             Search in context map (when viewer open)
+  [yellow]n[-]             Next search match
+  [yellow]N[-]             Previous search match
+  [yellow]Esc[-]           Close context map viewer
 
 [green::b]View Controls[-:-:-]
   [yellow]Tab[-]           Switch focus between panels
@@ -305,7 +325,7 @@ func (c *ConsoleApp) gotoIDE(path string) {
 
 	c.statusBar = tview.NewTextView()
 	c.statusBar.SetDynamicColors(true)
-	c.statusBar.SetText(" [yellow]?[-] Help  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff View  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse ")
+	c.updateStatusBar()
 
 	c.helpPanel = tview.NewTextView()
 	c.helpPanel.SetDynamicColors(true)
@@ -493,8 +513,19 @@ func (c *ConsoleApp) gotoIDE(path string) {
 				c.currentDiffView = "diff"
 				c.updateStepDetails(c.steps.GetCurrentNode())
 				return nil
+			case 'm':
+				if hasContextMapData(c.currentEventData) {
+					c.showContextMapForEvent(c.currentEventData)
+				}
+				return nil
 			}
 		case tcell.KeyEscape:
+			// Close context map if open (let it handle its own close)
+			if c.pages.HasPage("contextmap") {
+				c.pages.RemovePage("contextmap")
+				c.app.SetFocus(c.steps)
+				return nil
+			}
 			// Close help if open
 			if c.pages.HasPage("help") {
 				c.pages.HidePage("help")
@@ -735,24 +766,43 @@ func (c *ConsoleApp) toggleHelp() {
 	}
 }
 
+func (c *ConsoleApp) updateStatusBar() {
+	// Base status bar text
+	statusText := " [yellow]?[-] Help  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse"
+
+	// Add context map shortcut if current event has context data
+	if hasContextMapData(c.currentEventData) {
+		statusText += "  [black:cyan] m [-:-:-] Context Map"
+	}
+
+	c.statusBar.SetText(statusText)
+}
+
 func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 	ref := node.GetReference()
 	if ref == nil {
 		c.stepDetails.SetText("")
+		c.currentEventData = apigorowler.StepProfilerData{}
+		c.updateStatusBar()
 		return
 	}
 
 	data, ok := ref.(apigorowler.StepProfilerData)
 	if !ok {
 		c.stepDetails.SetText("")
+		c.currentEventData = apigorowler.StepProfilerData{}
+		c.updateStatusBar()
 		return
 	}
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// Store current event data for diff toggling
+	// Store current event data for diff toggling and status bar
 	c.currentEventData = data
+
+	// Update status bar to show context map shortcut if available
+	c.updateStatusBar()
 
 	c.stepDetails.ScrollToBeginning()
 
@@ -851,7 +901,12 @@ func (c *ConsoleApp) formatContextSelection(sb *strings.Builder, data apigorowle
 	if ctx, ok := data.Data["currentContextData"]; ok {
 		sb.WriteString("[cyan::b]Current Context Data[-:-:-]\n")
 		jsonStr, _ := json.MarshalIndent(ctx, "", "  ")
-		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+		sb.WriteString(fmt.Sprintf("%s\n\n", escapeBrackets(string(jsonStr))))
+	}
+
+	// Show hint for full context map modal
+	if _, ok := data.Data["fullContextMap"]; ok {
+		sb.WriteString("[#888888]Press [yellow::b]m[-:-:-][#888888] to open full context map viewer[-]\n")
 	}
 }
 
@@ -882,7 +937,12 @@ func (c *ConsoleApp) formatUrlComposition(sb *strings.Builder, data apigorowler.
 		sb.WriteString(fmt.Sprintf("[cyan::b]URL Template:[-:-:-]\n%s\n\n", template))
 	}
 	if resultUrl, ok := data.Data["resultUrl"].(string); ok {
-		sb.WriteString(fmt.Sprintf("[green::b]Result URL:[-:-:-]\n%s\n", resultUrl))
+		sb.WriteString(fmt.Sprintf("[green::b]Result URL:[-:-:-]\n%s\n\n", resultUrl))
+	}
+
+	// Show hint for template context modal
+	if _, ok := data.Data["goTemplateContext"]; ok {
+		sb.WriteString("[#888888]Press [yellow::b]m[-:-:-][#888888] to open template context viewer[-]\n")
 	}
 }
 
@@ -1055,6 +1115,11 @@ func (c *ConsoleApp) formatContextMerge(sb *strings.Builder, data apigorowler.St
 		diff := getColoredDiff(string(beforeStr), string(afterStr))
 		sb.WriteString(diff)
 		sb.WriteString("\n")
+	}
+
+	// Show hint for full context map modal
+	if _, ok := data.Data["fullContextMap"]; ok {
+		sb.WriteString("\n[#888888]Press [yellow::b]m[-:-:-][#888888] to open full context map viewer[-]\n")
 	}
 }
 

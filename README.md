@@ -866,5 +866,5 @@ These files provide practical, ready-to-use examples for common crawling pattern
 
 ## Debug & development
 ```bash
-(cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2)
+(cd cmd/ide && dlv debug ./... --headless=true --listen=:2345 --api-version=2)
 ```
