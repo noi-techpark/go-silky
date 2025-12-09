@@ -41,6 +41,124 @@ The library comes with a [developer IDE](cmd/ide/) which helps in building, debu
 
 ---
 
+## Installation & Development Tools
+
+Silky provides two development tools to help build, test, and debug configurations:
+
+### Terminal IDE (TUI)
+
+The terminal-based IDE provides an interactive environment for developing Silky configurations with real-time execution feedback.
+
+**Installation:**
+```bash
+# Build the IDE
+cd cmd/ide && go build -o silky-ide
+
+# Or run directly
+cd cmd/ide && go run .
+```
+
+**Features:**
+- File watcher with auto-restart on configuration changes
+- Step-by-step execution visualization
+- Context inspection at each step
+- Export execution tree to `/out` folder for debugging
+- Keyboard shortcuts for navigation and control
+
+**Usage:**
+```bash
+# Run the IDE and select a configuration file
+./silky-ide
+
+# Or specify a file directly
+./silky-ide path/to/config.silky.yaml
+```
+
+**Keyboard Shortcuts:**
+| Key | Action |
+|-----|--------|
+| `Enter` | Select step / Expand details |
+| `j`/`k` or `Up`/`Down` | Navigate steps |
+| `c` | View context map |
+| `r` | Restart execution |
+| `s` | Stop execution |
+| `d` | Dump execution tree to /out |
+| `q` | Quit |
+| `?` | Show help |
+
+### VS Code Extension
+
+The VS Code extension provides IDE integration with syntax highlighting, validation, snippets, and execution capabilities.
+
+**Installation:**
+
+1. **From GitHub Release (Recommended):**
+   - Go to [Releases](https://github.com/noi-techpark/go-silky/releases)
+   - Download the latest `silky-vscode-*.vsix` file
+   - Install via command line:
+     ```bash
+     code --install-extension silky-vscode-0.1.0.vsix
+     ```
+   - Or install via VS Code UI:
+     1. Open VS Code
+     2. Go to Extensions (Ctrl+Shift+X)
+     3. Click the `...` menu at the top of the Extensions panel
+     4. Select "Install from VSIX..."
+     5. Browse to the downloaded `.vsix` file
+
+2. **Build from Source:**
+   ```bash
+   # Build the extension
+   cd vscode-extension
+   npm install
+   npm run package
+
+   # Install in VS Code
+   code --install-extension silky-vscode-*.vsix
+   ```
+
+3. **For Development:**
+   ```bash
+   cd vscode-extension
+   npm install
+   npm run compile
+   # Press F5 in VS Code to launch Extension Development Host
+   ```
+
+**Prerequisites:**
+- VS Code 1.80.0 or higher
+- [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml) by Red Hat (will be prompted to install)
+
+**Build Prerequisites (only if building from source):**
+- Go 1.21+ (for building binaries)
+- Node.js 18+ (for building extension)
+
+**Features:**
+- JSON Schema validation for `.silky.yaml` files
+- 37 code snippets with `silky-` prefix
+- Execution with step-by-step timeline visualization
+- Context and result inspection
+- Integrated profiler view
+
+**Usage:**
+1. Create a file with `.silky.yaml` extension
+2. Use snippets: type `silky-` and select from autocomplete
+3. Click the play button in the editor title bar to run
+4. View execution steps in the Silky sidebar panel
+5. Click on steps to inspect context and results
+
+**Configuration:**
+```json
+{
+  "silky.autoValidate": true,
+  "silky.autoRun": false,
+  "silky.maxOutputSize": 10000,
+  "silky.collapseSteps": false
+}
+```
+
+---
+
 ## Context System
 
 Silky's context system is the foundation of its data processing capabilities. Understanding how contexts work is essential for building effective crawl configurations.
@@ -63,26 +181,6 @@ Silky distinguishes between two types of contexts:
 * **Working contexts**: Temporary contexts created by request steps to hold response data. When a request executes within a canonical context (like "root"), it creates a working context with a `_response_` prefix internally, ensuring the canonical context remains available for merge operations.
 
 This architecture ensures that `mergeWithContext: {name: root}` always merges into the actual root context, not a cloned copy.
-
-### Context Preservation with Request `as`
-
-The `as` parameter on request steps is crucial when you need nested steps to access variables from outer forEach loops:
-
-**Without `as` (context replacement):**
-```yaml
-forEach as: language    # Creates "language" context
-  request               # REPLACES "language" context with response
-    forEach as: item
-      request           # Cannot access .language - it was replaced!
-```
-
-**With `as` (context preservation):**
-```yaml
-forEach as: language    # Creates "language" context
-  request as: data      # Creates NEW "data" context, preserves "language"
-    forEach as: item
-      request           # Can access both .language and .data!
-```
 
 ### Context Variables
 
@@ -825,30 +923,75 @@ Feel free to contribute by adding more examples or tests! 🚀
 
 These files are used for automated testing of the **paginator** and **crawler** components.
 
-| Test                                                                                     | Short Description                                                        |
-| :--------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
-| [`test1_int_increment.yaml`](testdata/paginator/test1_int_increment.yaml)                | Tests pagination using a simple integer increment.                       |
-| [`test2_datetime.yaml`](testdata/paginator/test2_datetime.yaml)                          | Tests pagination based on datetime values.                               |
-| [`test3_next_token.yaml`](testdata/paginator/test3_next_token.yaml)                      | Tests pagination using a next token from the response.                   |
-| [`test4_empty.yaml`](testdata/paginator/test4_empty.yaml)                                | Checks handling of an empty response.                                    |
-| [`test5_empty_array.yaml`](testdata/paginator/test5_empty_array.yaml)                    | Checks handling of a response with an empty array.                       |
-| [`test6_now_datetime.yaml`](testdata/paginator/test6_now_datetime.yaml)                  | Tests pagination using the current datetime.                             |
-| [`test7_now_datetime_multistop.yaml`](testdata/paginator/test7_now_datetime_multistop.yaml)| Tests pagination with multiple stop conditions based on datetime.        |
-| [`test8_example_pagination_url.yaml`](testdata/paginator/test8_example_pagination_url.yaml)| Tests pagination using a full next URL.                                  |
-| [`test9_stop_on_iteration.yaml`](testdata/paginator/test9_stop_on_iteration.yaml)        | Tests the stop condition based on the iteration count.                   |
-| [`example.yaml`](testdata/crawler/example.yaml)                                          | A general, baseline crawler configuration.                               |
-| [`example2.yaml`](testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
-| [`example_single.yaml`](testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
-| [`example_foreach_value.yaml`](testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
-| [`example_foreach_value_transform_ctx.yaml`](testdata/crawler/example_foreach_value_transform_ctx.yaml) | Demonstrates `foreach` iteration using value in transformation |
-| [`example_foreach_value_stream.yaml`](testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
-| [`example_pagination_next.yaml`](testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
-| [`example_pagination_increment.yaml`](testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |
-| [`example_pagination_increment_stream.yaml`](testdata/crawler/example_pagination_increment_stream.yaml)| Tests simple pagination with streaming enabled.                          |
-| [`example_pagination_increment_nested.yaml`](testdata/crawler/example_pagination_increment_nested.yaml)| Tests pagination on a nested API request.                                |
-| [`post_json_body.yaml`](testdata/crawler/post_json_body.yaml)                            | Tests POST request with JSON body.                                       |
-| [`post_form_urlencoded.yaml`](testdata/crawler/post_form_urlencoded.yaml)                | Tests POST request with form-encoded body.                               |
-| [`post_body_merge_pagination.yaml`](testdata/crawler/post_body_merge_pagination.yaml)    | Tests POST with body, pagination, and custom merging.                    |
+#### Paginator Tests
+
+| Test | Description |
+| :--- | :---------- |
+| [`test1_int_increment.yaml`](testdata/paginator/test1_int_increment.yaml) | Pagination using simple integer increment |
+| [`test2_datetime.yaml`](testdata/paginator/test2_datetime.yaml) | Pagination based on datetime values |
+| [`test3_next_token.yaml`](testdata/paginator/test3_next_token.yaml) | Pagination using next token from response |
+| [`test4_empty.yaml`](testdata/paginator/test4_empty.yaml) | Handling empty response |
+| [`test5_empty_array.yaml`](testdata/paginator/test5_empty_array.yaml) | Handling response with empty array |
+| [`test6_now_datetime.yaml`](testdata/paginator/test6_now_datetime.yaml) | Pagination using current datetime |
+| [`test7_now_datetime_multistop.yaml`](testdata/paginator/test7_now_datetime_multistop.yaml) | Multiple stop conditions with datetime |
+| [`test8_example_pagination_url.yaml`](testdata/paginator/test8_example_pagination_url.yaml) | Pagination using full next URL |
+| [`test9_stop_on_iteration.yaml`](testdata/paginator/test9_stop_on_iteration.yaml) | Stop condition based on iteration count |
+
+#### Crawler Tests
+
+| Test | Description |
+| :--- | :---------- |
+| [`example.yaml`](testdata/crawler/example.yaml) | Baseline crawler configuration |
+| [`example2.yaml`](testdata/crawler/example2.yaml) | Complex crawler with nested requests |
+| [`example_single.yaml`](testdata/crawler/example_single.yaml) | Single non-paginated request |
+| [`example_foreach_value.yaml`](testdata/crawler/example_foreach_value.yaml) | ForEach iteration over response values |
+| [`example_foreach_value_transform_ctx.yaml`](testdata/crawler/example_foreach_value_transform_ctx.yaml) | ForEach with context in transformation |
+| [`example_foreach_value_stream.yaml`](testdata/crawler/example_foreach_value_stream.yaml) | ForEach iteration with streaming |
+| [`example_pagination_next.yaml`](testdata/crawler/example_pagination_next.yaml) | Pagination using next_url from response |
+| [`example_pagination_increment.yaml`](testdata/crawler/example_pagination_increment.yaml) | Pagination with incrementing number |
+| [`example_pagination_increment_stream.yaml`](testdata/crawler/example_pagination_increment_stream.yaml) | Pagination with streaming enabled |
+| [`example_pagination_increment_nested.yaml`](testdata/crawler/example_pagination_increment_nested.yaml) | Pagination on nested request |
+| [`post_json_body.yaml`](testdata/crawler/post_json_body.yaml) | POST request with JSON body |
+| [`post_form_urlencoded.yaml`](testdata/crawler/post_form_urlencoded.yaml) | POST request with form-encoded body |
+| [`post_body_merge_pagination.yaml`](testdata/crawler/post_body_merge_pagination.yaml) | POST with body, pagination, and merging |
+
+#### Authentication Tests
+
+| Test | Description |
+| :--- | :---------- |
+| [`auth_basic.yaml`](testdata/crawler/auth_basic.yaml) | Basic HTTP authentication |
+| [`auth_bearer.yaml`](testdata/crawler/auth_bearer.yaml) | Bearer token authentication |
+| [`auth_oauth_password.yaml`](testdata/crawler/auth_oauth_password.yaml) | OAuth2 password grant flow |
+| [`auth_oauth_client_credentials.yaml`](testdata/crawler/auth_oauth_client_credentials.yaml) | OAuth2 client credentials flow |
+| [`auth_cookie.yaml`](testdata/crawler/auth_cookie.yaml) | Cookie-based authentication |
+| [`auth_jwt_body.yaml`](testdata/crawler/auth_jwt_body.yaml) | JWT auth with token from response body |
+| [`auth_jwt_header.yaml`](testdata/crawler/auth_jwt_header.yaml) | JWT auth with token from response header |
+| [`auth_custom_cookie_to_header.yaml`](testdata/crawler/auth_custom_cookie_to_header.yaml) | Custom auth: extract cookie, inject as header |
+| [`auth_custom_body_to_query.yaml`](testdata/crawler/auth_custom_body_to_query.yaml) | Custom auth: extract from body, inject as query param |
+| [`auth_mixed_override.yaml`](testdata/crawler/auth_mixed_override.yaml) | Global auth with request-level override |
+
+#### ForValues Tests
+
+| Test | Description |
+| :--- | :---------- |
+| [`forvalues_simple.yaml`](testdata/crawler/forvalues_simple.yaml) | Simple forValues iteration |
+| [`forvalues_nested.yaml`](testdata/crawler/forvalues_nested.yaml) | Nested forValues iterations |
+| [`forvalues_objects.yaml`](testdata/crawler/forvalues_objects.yaml) | ForValues with object values |
+| [`request_as_dynamic_keys.yaml`](testdata/crawler/request_as_dynamic_keys.yaml) | Request with dynamic context keys |
+| [`request_as_context_disconnect.yaml`](testdata/crawler/request_as_context_disconnect.yaml) | Request context isolation |
+| [`edge_case_multiple_forvalues.yaml`](testdata/crawler/edge_case_multiple_forvalues.yaml) | Multiple forValues at same level |
+| [`edge_case_deep_nesting.yaml`](testdata/crawler/edge_case_deep_nesting.yaml) | Deep nesting edge cases |
+
+#### Parallel Execution Tests
+
+| Test | Description |
+| :--- | :---------- |
+| [`parallel/simple.yaml`](testdata/crawler/parallel/simple.yaml) | Basic parallel forEach execution |
+| [`parallel/ratelimited.yaml`](testdata/crawler/parallel/ratelimited.yaml) | Parallel execution with rate limiting |
+| [`parallel/noop_merge.yaml`](testdata/crawler/parallel/noop_merge.yaml) | Parallel with noopMerge strategy |
+| [`parallel/nested_parallel.yaml`](testdata/crawler/parallel/nested_parallel.yaml) | Nested parallel forEach steps |
+| [`parallel/multi_root_parallel.yaml`](testdata/crawler/parallel/multi_root_parallel.yaml) | Multiple parallel roots |
+| [`parallel/error_handling.yaml`](testdata/crawler/parallel/error_handling.yaml) | Error handling in parallel execution |
 
 -----
 
@@ -856,15 +999,42 @@ These files are used for automated testing of the **paginator** and **crawler** 
 
 These files provide practical, ready-to-use examples for common crawling patterns.
 
-| Example                                                                                              | Short Description                                                        |
-| :--------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
-| [`foreach-iteration-not-streamed.yaml`](examples/foreach-iteration-not-streamed.yaml)                | Example of iterating over a list without streaming the final output.     |
-| [`list-and-details-paginated-stopped-streamed.yaml`](examples/list-and-details-paginated-stopped-streamed.yaml)| A complex example combining pagination, stop conditions, and streaming.  |
-| [`pagination-url-not-stream.yaml`](examples/pagination-url-not-stream.yaml)                          | Example of pagination using a next URL without streaming.                |
+| Example | Description |
+| :------ | :---------- |
+| [`foreach-iteration-not-streamed.yaml`](examples/foreach-iteration-not-streamed.yaml) | Iterating over a list without streaming |
+| [`list-and-details-paginated-stopped-streamed.yaml`](examples/list-and-details-paginated-stopped-streamed.yaml) | Pagination + stop conditions + streaming |
+| [`pagination-url-not-stream.yaml`](examples/pagination-url-not-stream.yaml) | Pagination using next URL without streaming |
 
 -----
 
-## Debug & development
+## Debug & Development
+
+### Running Tests
 ```bash
-(cd cmd/ide && dlv debug ./... --headless=true --listen=:2345 --api-version=2)
+# Run all tests
+go test -v ./...
+
+# Run specific test
+go test -v -run TestExampleForeachValue
+
+# Run paginator tests only
+go test -v -run TestPaginator
 ```
+
+### Building
+```bash
+# Build all packages
+go build -v ./...
+
+# Build the IDE
+cd cmd/ide && go build -o silky-ide
+```
+
+### Debugging with Delve
+```bash
+# Debug IDE with headless Delve (attach from VS Code or other debugger)
+cd cmd/ide && dlv debug ./... --headless=true --listen=:2345 --api-version=2
+```
+
+### VS Code Debug Configuration
+The repository includes VS Code debug configurations in `.vscode/launch.json` for attaching to the Delve debugger on port 2345.
