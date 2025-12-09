@@ -1,0 +1,29 @@
+# Test: Cookie-Based Authentication
+# This test performs a login request, extracts a session cookie, and uses it for subsequent requests
+# The authenticator caches the cookie and refreshes it after maxAgeSeconds
+
+rootContext: []
+
+# Cookie-based authentication
+auth:
+  type: cookie
+  loginRequest:
+    url: https://app.example.com/api/auth/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      username: cookieuser
+      password: cookiepass123
+  # Extract this cookie name from login response
+  extractSelector: session_token
+  # Refresh cookie after 1 hour
+  maxAgeSeconds: 3600
+
+steps:
+  - type: request
+    name: "Get dashboard data"
+    request:
+      url: https://app.example.com/api/dashboard
+      method: GET
+    resultTransformer: .dashboard.widgets

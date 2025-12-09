@@ -1,0 +1,20 @@
+# Test: Parallel execution with error handling
+# Demonstrates: error handling in parallel forEach execution
+
+# Start with array of values to iterate over
+rootContext: [1, 2, 3]
+
+steps:
+  - type: forEach
+    path: .
+    as: id
+    parallelism:
+      maxConcurrency: 3
+    steps:
+      - type: request
+        name: Get Item
+        request:
+          url: "https://api.example.com/items/{{ .id }}"
+          method: GET
+        resultTransformer: .
+        mergeOn: ". = $res"

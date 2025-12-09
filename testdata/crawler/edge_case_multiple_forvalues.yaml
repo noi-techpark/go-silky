@@ -1,0 +1,33 @@
+# Edge Case Test: Multiple forValues with nested requests all merging to root
+# Tests that forValues overlay contexts don't interfere with each other
+# and all can successfully merge to the canonical root
+
+rootContext: {"results": []}
+
+steps:
+  # First forValues iteration
+  - type: forValues
+    name: Iterate regions
+    values: ["us", "eu"]
+    as: region
+    steps:
+      # Nested forValues - tests matrix iteration
+      - type: forValues
+        name: Iterate tiers
+        values: ["free", "premium"]
+        as: tier
+        steps:
+          - type: request
+            name: Get tier data
+            request:
+              url: "https://api.example.com/data?region={{ .region }}&tier={{ .tier }}"
+              method: GET
+            resultTransformer: |
+              {
+                region: $ctx.region,
+                tier: $ctx.tier,
+                data: .response
+              }
+            mergeWithContext:
+              name: root
+              rule: ".results += [$res]"

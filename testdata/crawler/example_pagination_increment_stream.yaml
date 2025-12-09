@@ -1,6 +1,11 @@
+# Test: Streaming mode with pagination and nested enrichment
+# Demonstrates: stream mode emits enriched entities incrementally as pages are processed
+
+# Start with empty array (required for stream mode)
 rootContext: []
+# Stream mode: entities emitted as they're enriched, don't wait for all pages
 stream: true
-  
+
 steps:
   - type: request
     name: Fetch Facilities
@@ -11,6 +16,7 @@ steps:
         Accept: application/json
       body:
 
+      # Pagination: fetch pages 0 and 1
       pagination:
         params:
           - name: offset
@@ -23,6 +29,7 @@ steps:
             param: ".query.offset"
             compare: gt
             value: 1
+    # Nested steps execute for each page
     steps:
       - type: forEach
         path: .
@@ -31,12 +38,16 @@ steps:
           - type: request
             name: Get Facility Free Places
             request:
+              # Enrich each facility from current page
               url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .facility.FacilityId }}
               method: GET
               headers:
                 Accept: application/json
             resultTransformer: '[.FreePlaces]'
+            # Add details to facility
+            # In stream mode, enriched facility emitted immediately
             mergeOn: .FacilityDetails = $res
 
+    # Extract data array from each page
     resultTransformer: .data
     

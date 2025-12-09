@@ -1,6 +1,11 @@
+# Test: Simple nested request with filtering and merging
+# Demonstrates: fetching data, filtering with jq, nested requests, Go templates, and mergeOn
+
+# Start with empty object - will be populated with facility data
 rootContext: {}
-  
+
 steps:
+  # First step: Fetch all facilities from API
   - type: request
     name: Fetch Facilities
     request:
@@ -8,17 +13,24 @@ steps:
       method: GET
       headers:
         Accept: application/json
+    # Filter facilities using jq: extract array and select specific merchant
+    # This transforms the response to contain only the matching facility
     resultTransformer: |
       .Facilities[]
         | select(.ReceiptMerchant == "STA – Strutture Trasporto Alto Adige SpA Via dei Conciapelli, 60 39100  Bolzano UID: 00586190217")
-      
+
+    # Nested step: Execute for the filtered facility
     steps:
       - type: request
         name: Get Facility Free Places
         request:
+          # Use Go template to inject FacilityId from parent context
           url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .FacilityId }}
           method: GET
           headers:
             Accept: application/json
+        # Wrap FreePlaces in array
         resultTransformer: '[.FreePlaces]'
+        # Merge result into current context (the facility) as .FacilityDetails
+        # $res refers to the transformed result
         mergeOn: .FacilityDetails = $res

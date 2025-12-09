@@ -2,83 +2,46 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package apigorowler
+package silky
 
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/itchyny/gojq"
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 )
 
-type StepProfileType int
-
-const (
-	STEP_PROFILER_TYPE_START      StepProfileType = 0
-	STEP_PROFILER_TYPE_NONE       StepProfileType = 1
-	STEP_PROFILER_TYPE_END        StepProfileType = 2
-	STEP_PROFILER_TYPE_END_SILENT StepProfileType = 3
-)
-
-type StepProfilerData struct {
-	Type       StepProfileType
-	Name       string
-	Config     Step
-	Data       any
-	DataBefore any
-	DataString string
-	Context    Context
-	Extra      map[string]any
+// ContextData represents a single context in a snapshot
+type ContextData struct {
+	Data          any    `json:"data"`
+	ParentContext string `json:"parentContext"`
+	Depth         int    `json:"depth"`
+	Key           string `json:"key"`
 }
 
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-type Logger interface {
-	Debug(msg string, args ...any)
-	Info(msg string, args ...any)
-	Warning(msg string, args ...any)
-	Error(msg string, args ...any)
-}
+const JQ_RES_KEY = "$res"
+const JQ_CTX_KEY = "$ctx"
 
-type stdLogger struct {
-	logger *log.Logger
+type ParallelismConfig struct {
+	MaxConcurrency    int     `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
+	RequestsPerSecond float64 `yaml:"requestsPerSecond,omitempty" json:"requestsPerSecond,omitempty"`
+	Burst             int     `yaml:"burst,omitempty" json:"burst,omitempty"`
 }
-
-func NewDefaultLogger() Logger {
-	return &stdLogger{
-		logger: log.New(os.Stdout, "", log.LstdFlags),
-	}
-}
-
-func (l *stdLogger) Info(msg string, args ...any) {
-	l.logger.Println("[INFO]", fmt.Sprintf(msg, args...)+"\n")
-}
-
-func (l *stdLogger) Debug(msg string, args ...any) {
-	l.logger.Println("[DEBUG]", fmt.Sprintf(msg, args...)+"\n")
-}
-
-func (l *stdLogger) Warning(msg string, args ...any) {
-	l.logger.Println("[WARN]", fmt.Sprintf(msg, args...)+"\n")
-}
-
-func (l *stdLogger) Error(msg string, args ...any) {
-	l.logger.Println("[ERROR]", fmt.Sprintf(msg, args...)+"\n")
-}
-
-const RES_KEY = "$res"
 
 type Config struct {
 	Steps          []Step               `yaml:"steps" json:"steps"`
@@ -100,13 +63,15 @@ type Step struct {
 	MergeWithParentOn string                `yaml:"mergeWithParentOn,omitempty" json:"mergeWithParentOn,omitempty"`
 	MergeOn           string                `yaml:"mergeOn,omitempty" json:"mergeOn,omitempty"`
 	MergeWithContext  *MergeWithContextRule `yaml:"mergeWithContext,omitempty" json:"mergeWithContext,omitempty"`
+	NoopMerge         bool                  `yaml:"noopMerge,omitempty" json:"noopMerge,omitempty"`
+	Parallelism       *ParallelismConfig    `yaml:"parallelism,omitempty" json:"parallelism,omitempty"`
 }
 
 type RequestConfig struct {
 	URL            string               `yaml:"url" json:"url"`
 	Method         string               `yaml:"method" json:"method"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
-	Body           string               `yaml:"body,omitempty" json:"body,omitempty"`
+	Body           map[string]any       `yaml:"body,omitempty" json:"body,omitempty"`
 	Pagination     Pagination           `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
@@ -128,6 +93,39 @@ type stepExecution struct {
 	currentContextKey string
 	currentContext    *Context
 	contextMap        map[string]*Context
+	parentID          string // Parent step ID for profiler hierarchy
+}
+
+// mergeOperation encapsulates the parameters needed for a merge operation
+type mergeOperation struct {
+	step            Step
+	currentContext  *Context
+	contextMap      map[string]*Context
+	result          any
+	templateContext map[string]any
+}
+
+// httpRequestContext encapsulates HTTP request preparation parameters
+type httpRequestContext struct {
+	urlTemplate    string
+	method         string
+	requestID      string
+	headers        map[string]string
+	configuredBody map[string]any
+	bodyParams     map[string]interface{}
+	contentType    string
+	queryParams    map[string]string
+	nextPageURL    string
+	authenticator  Authenticator
+}
+
+// forEachResult holds the result of a single forEach iteration
+type forEachResult struct {
+	index          int
+	result         any
+	profilerEvents []StepProfilerData
+	err            error
+	threadID       int
 }
 
 type ApiCrawler struct {
@@ -137,10 +135,10 @@ type ApiCrawler struct {
 	DataStream          chan any
 	logger              Logger
 	httpClient          HTTPClient
-	profiler            chan StepProfilerData
-	enableProfilation   bool
+	profiler            *Profiler
 	templateCache       map[string]*template.Template
 	jqCache             map[string]*gojq.Code
+	mergeMutex          sync.Mutex // Protects concurrent merge operations
 }
 
 func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
@@ -164,7 +162,7 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		httpClient:    http.DefaultClient,
 		Config:        cfg,
 		ContextMap:    map[string]*Context{},
-		logger:        NewDefaultLogger(),
+		logger:        NewNoopLogger(),
 		profiler:      nil,
 		templateCache: make(map[string]*template.Template),
 		jqCache:       make(map[string]*gojq.Code),
@@ -175,12 +173,6 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		c.DataStream = make(chan any)
 	}
 
-	// instantiate global authenticator
-	if cfg.Authentication != nil {
-		c.globalAuthenticator = NewAuthenticator(*cfg.Authentication)
-	} else {
-		c.globalAuthenticator = NoopAuthenticator{}
-	}
 	return c, nil, nil
 }
 
@@ -201,9 +193,8 @@ func (a *ApiCrawler) SetClient(client HTTPClient) {
 }
 
 func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
-	a.enableProfilation = true
-	a.profiler = make(chan StepProfilerData)
-	return a.profiler
+	a.profiler = NewProfiler(&a.mergeMutex)
+	return a.profiler.Channel()
 }
 
 // getOrCompileTemplate retrieves a pre-compiled template from the cache,
@@ -250,72 +241,28 @@ func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) 
 	return code, nil
 }
 
-func deepCopy[T any](src T) (T, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	dec := gob.NewDecoder(&buf)
-
-	if err := enc.Encode(src); err != nil {
-		var zero T
-		return zero, err
-	}
-
-	var dst T
-	if err := dec.Decode(&dst); err != nil {
-		return dst, err
-	}
-
-	return dst, nil
-}
-
-func (a *ApiCrawler) pushProfilerData(dataType StepProfileType, name string, exec *stepExecution, data any, dataBefore any, extra ...any) {
-	if a.profiler == nil {
-		return
-	}
-
-	cleanConfig := Step{}
-	context := Context{}
-	if exec != nil {
-		// Defensive copy of step, with Steps cleared
-		cleanConfig, _ = deepCopy(exec.step)
-		cleanConfig.Steps = make([]Step, 0)
-
-		context = *exec.currentContext
-	}
-
-	// Convert variadic args into map[string]any
-	extraMap := make(map[string]any)
-	for i := 0; i+1 < len(extra); i += 2 {
-		key, ok := extra[i].(string)
-		if !ok {
-			continue // skip invalid key
-		}
-		extraMap[key] = extra[i+1]
-	}
-
-	d := StepProfilerData{
-		Type:       dataType,
-		Name:       name,
-		Context:    context,
-		Data:       data,
-		DataBefore: dataBefore,
-		Config:     cleanConfig,
-		Extra:      extraMap,
-	}
-
-	a.profiler <- d
-}
-
-func newStepExecution(step Step, currentContextKey string, contextMap map[string]*Context) *stepExecution {
+func newStepExecution(step Step, currentContextKey string, contextMap map[string]*Context, parentID string) *stepExecution {
 	return &stepExecution{
 		step:              step,
 		currentContextKey: currentContextKey,
 		contextMap:        contextMap,
 		currentContext:    contextMap[currentContextKey],
+		parentID:          parentID,
 	}
 }
 
 func (c *ApiCrawler) Run(ctx context.Context) error {
+	// instantiate global authenticator at Run time so we force the authenticator to refresh
+	if c.Config.Authentication != nil {
+		c.globalAuthenticator = NewAuthenticator(*c.Config.Authentication, c.httpClient)
+	} else {
+		c.globalAuthenticator = NoopAuthenticator{
+			BaseAuthenticator: &BaseAuthenticator{
+				profiler: &AuthProfiler{authType: "cookie"},
+			},
+		}
+	}
+
 	rootCtx := &Context{
 		Data:          c.Config.RootContext,
 		ParentContext: "",
@@ -326,14 +273,21 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 	c.ContextMap["root"] = rootCtx
 	currentContext := "root"
 
+	// Emit ROOT_START event
+	rootID := c.profiler.EmitRootStart(c.Config, c.ContextMap)
+
 	for _, step := range c.Config.Steps {
-		ecxec := newStepExecution(step, currentContext, c.ContextMap)
+		ecxec := newStepExecution(step, currentContext, c.ContextMap, rootID)
 		if err := c.ExecuteStep(ctx, ecxec); err != nil {
 			return err
 		}
 	}
 
-	c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Result", nil, c.GetData(), c.Config.RootContext)
+	// Emit final result if not streaming
+	if !c.Config.Stream {
+		c.profiler.EmitFinalResult(rootID, rootCtx.Data)
+	}
+
 	return nil
 }
 
@@ -343,6 +297,8 @@ func (c *ApiCrawler) ExecuteStep(ctx context.Context, exec *stepExecution) error
 		return c.handleRequest(ctx, exec)
 	case "forEach":
 		return c.handleForEach(ctx, exec)
+	case "forValues":
+		return c.handleForValues(ctx, exec)
 	default:
 		return fmt.Errorf("unknown step type: %s", exec.step.Type)
 	}
@@ -351,264 +307,471 @@ func (c *ApiCrawler) ExecuteStep(ctx context.Context, exec *stepExecution) error
 func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) error {
 	c.logger.Info("[Request] Preparing %s", exec.step.Name)
 
-	// 1. Expand URL using Go template
-	tmpl, err := c.getOrCompileTemplate(exec.step.Request.URL)
-	if err != nil {
-		return fmt.Errorf("error getting/compiling URL template: %w", err)
-	}
+	// Emit REQUEST_STEP_START event
+	stepStartTime := time.Now()
+	stepID := c.profiler.EmitRequestStepStart(exec.step, exec.parentID)
 
-	var urlBuf bytes.Buffer
 	templateCtx := contextMapToTemplate(exec.contextMap)
-	if err := tmpl.Execute(&urlBuf, templateCtx); err != nil {
-		return fmt.Errorf("error executing URL template: %w", err)
-	}
-	_url := urlBuf.String()
 
-	// instantiate authenticator
+	// Determine authenticator (request-specific overrides global)
 	authenticator := c.globalAuthenticator
 	if exec.step.Request.Authentication != nil {
-		authenticator = NewAuthenticator(*exec.step.Request.Authentication)
+		authenticator = NewAuthenticator(*exec.step.Request.Authentication, c.httpClient)
 	}
 
-	// instantiate paginator
+	// Set profiler on authenticator
+	if authenticator != nil && c.profiler.Enabled() {
+		authenticator.SetProfiler(c.profiler.Channel())
+	}
+
+	// Initialize paginator
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
+		c.profiler.EmitError("Paginator Error", stepID, err.Error())
 		return fmt.Errorf("error creating request paginator: %w", err)
 	}
+
 	stop := false
 	next := paginator.NextFromCtx()
 
+	// Track previous response for PAGINATION_EVAL event
+	var previousResponseBody interface{}
+	var previousResponseHeaders map[string]string
+
+	// Pagination loop
 	for !stop {
-		// context cancelation handling
+		// Check for context cancellation
 		select {
 		case <-ctx.Done():
-			return ctx.Err() // Context cancelled
+			return ctx.Err()
 		default:
-			var urlObj *url.URL
-			if len(next.NextPageUrl) == 0 {
-				urlObj, err = url.Parse(_url)
-				if err != nil {
-					return fmt.Errorf("invalid URL %s: %w", _url, err)
-				}
-			} else {
-				urlObj, err = url.Parse(next.NextPageUrl)
-				if err != nil {
-					return fmt.Errorf("invalid next.NextPageUrl URL %s: %w", next.NextPageUrl, err)
-				}
-			}
+		}
 
-			// 1. Inject query params
-			query := urlObj.Query()
-			for k, v := range next.QueryParams {
-				query.Set(k, v)
-			}
-			urlObj.RawQuery = query.Encode()
+		pageNum := paginator.PageNum()
 
-			// 2. Encode body if needed
-			var reqBody io.Reader
-			if len(next.BodyParams) > 0 {
-				bodyJSON, err := json.Marshal(next.BodyParams)
-				if err != nil {
-					return fmt.Errorf("error encoding body params: %w", err)
-				}
-				reqBody = bytes.NewReader(bodyJSON)
-			}
+		// Emit REQUEST_PAGE_START event
+		pageStartTime := time.Now()
+		pageID := c.profiler.EmitRequestPageStart(stepID, exec.step, pageNum)
 
-			// 2. Create and send HTTP request
-			req, err := http.NewRequest(exec.step.Request.Method, urlObj.String(), reqBody)
-			if err != nil {
-				return fmt.Errorf("error creating HTTP request: %w", err)
-			}
-			// Apply headers from both config and paginator
-			// priority is (ascending order)
-			// 1. Global
-			// 2. Request
-			// 3. Pagination
-			for k, v := range c.Config.Headers {
-				req.Header.Set(k, v)
-			}
-			for k, v := range exec.step.Request.Headers {
-				req.Header.Set(k, v)
-			}
-			for k, v := range next.Headers {
-				req.Header.Set(k, v)
-			}
+		// Prepare HTTP request
+		reqCtx := httpRequestContext{
+			requestID:      pageID,
+			urlTemplate:    exec.step.Request.URL,
+			method:         exec.step.Request.Method,
+			headers:        exec.step.Request.Headers,
+			configuredBody: exec.step.Request.Body,
+			bodyParams:     next.BodyParams,
+			contentType:    getContentType(exec.step.Request.Headers),
+			queryParams:    next.QueryParams,
+			nextPageURL:    next.NextPageUrl,
+			authenticator:  authenticator,
+		}
 
-			// apply authentication
-			authenticator.PrepareRequest(req)
+		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx, c.Config.Headers)
+		if err != nil {
+			c.profiler.EmitError("Prepare Request Error", pageID, err.Error())
+			return err
+		}
 
-			c.logger.Info("[Request] %s", urlObj.String())
-
-			resp, err := c.httpClient.Do(req)
-			if err != nil {
-				return fmt.Errorf("error performing HTTP request: %w", err)
-			}
-			defer resp.Body.Close()
-
-			// run next
-			next, stop, err = paginator.Next(resp)
-			if err != nil {
-				return fmt.Errorf("paginator update error: %w", err)
-			}
-
-			// 3. Decode JSON response into interface{}
-			var raw interface{}
-			if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-				return fmt.Errorf("error decoding JSON: %w", err)
-			}
-
-			profileStepName := fmt.Sprintf("Request '%s' | page#%d", exec.step.Name, paginator.PageNum())
-			c.pushProfilerData(STEP_PROFILER_TYPE_START, profileStepName, exec, raw, nil, "url", urlObj.String())
-
-			// 4. Apply JQ transformer
-			transformed := raw
-			c.logger.Debug("[Request] Got response: status %s", resp.Status)
-
-			if exec.step.ResultTransformer != "" {
-				c.logger.Debug("[Request] transforming with expression: %s", exec.step.ResultTransformer)
-
-				// Create the evaluation context with $res variable bound
-				code, err := c.getOrCompileJQRule(exec.step.ResultTransformer, "$ctx")
-				if err != nil {
-					return fmt.Errorf("failed to get/compile transform rule: %w", err)
-				}
-
-				iter := code.Run(raw, templateCtx)
-				var singleResult interface{}
-				count := 0
-
-				for {
-					v, ok := iter.Next()
-					if !ok {
-						break
-					}
-					if err, isErr := v.(error); isErr {
-						return fmt.Errorf("jq error: %w", err)
-					}
-
-					count++
-					if count > 1 {
-						return fmt.Errorf("resultTransformer yielded more than one value")
-					}
-
-					singleResult = v
-				}
-				transformed = singleResult
-			}
-
-			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Transformation", exec, transformed, raw, "url", urlObj.String())
-
-			thisContextKey := exec.currentContextKey
-			if exec.step.As != "" {
-				thisContextKey = exec.step.As
-			}
-			// ------------
-			// Nested foreach must happen on the "temporary" transform result, not the actual context because the results
-			// accumulated over calls and the foreach would end iterating the whole result each time
-
-			// create a new child context overriding current key
-			childContextMap := childMapWith(exec.contextMap, exec.currentContext, thisContextKey, transformed)
-
-			for _, step := range exec.step.Steps {
-				newExec := newStepExecution(step, thisContextKey, childContextMap)
-				// newExec := newStepExecution(step, exec.currentContextKey, c.ContextMap)
-				if err := c.ExecuteStep(ctx, newExec); err != nil {
-					return err
+		// Emit URL_COMPOSITION event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
+			resultHeaders := make(map[string]string)
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					resultHeaders[k] = v[0]
 				}
 			}
 
-			// use the nested result as transformed to perform merging
-			transformed = childContextMap[thisContextKey].Data
+			var resultBody interface{}
+			if req.Body != nil {
+				resultBody = next.BodyParams
+			}
 
-			// 1. Explicit merge rule (advanced use)
+			c.profiler.EmitURLComposition(pageID, exec.step, URLCompositionData{
+				URLTemplate:     exec.step.Request.URL,
+				PageNumber:      pageNum,
+				QueryParams:     next.QueryParams,
+				BodyParams:      next.BodyParams,
+				NextPageURL:     next.NextPageUrl,
+				TemplateContext: templateCtx,
+				ResultURL:       urlObj.String(),
+				ResultHeaders:   resultHeaders,
+				ResultBody:      resultBody,
+			})
+		}
+
+		c.logger.Info("[Request] %s", urlObj.String())
+
+		// Emit REQUEST_DETAILS event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
+			// Build curl command
+			curlCmd := fmt.Sprintf("curl -X %s '%s'", req.Method, urlObj.String())
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					curlCmd += fmt.Sprintf(" -H '%s: %s'", k, v[0])
+				}
+			}
+			if req.Body != nil && len(next.BodyParams) > 0 {
+				bodyJSON, _ := json.Marshal(next.BodyParams)
+				curlCmd += fmt.Sprintf(" -d '%s'", string(bodyJSON))
+			}
+
+			// Build headers map
+			headers := make(map[string]string)
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+
+			c.profiler.EmitRequestDetails(pageID, exec.step, RequestDetailsData{
+				CurlCommand: curlCmd,
+				Method:      req.Method,
+				URL:         urlObj.String(),
+				Headers:     headers,
+				Body:        next.BodyParams,
+			})
+		}
+
+		c.logger.Debug("[Request] Got response: status pending")
+
+		// Execute HTTP request with timing
+		requestStartTime := time.Now()
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			c.profiler.EmitError("Request Error", pageID, err.Error())
+			return fmt.Errorf("error performing HTTP request: %w", err)
+		}
+		defer resp.Body.Close()
+		durationMs := time.Since(requestStartTime).Milliseconds()
+
+		// Compute response size
+		responseSize := int(resp.ContentLength)
+		if responseSize < 0 {
+			responseSize = 0
+		}
+
+		// Capture pagination state BEFORE calling paginator.Next() (only if profiling)
+		var previousPageState map[string]any
+		if c.profiler.Enabled() {
+			previousPageState = map[string]any{
+				"pageNumber": pageNum,
+				"params": map[string]any{
+					"queryParams": next.QueryParams,
+					"bodyParams":  next.BodyParams,
+				},
+				"nextPageUrl": next.NextPageUrl,
+			}
+		}
+
+		// Update pagination state (reads and restores response body)
+		next, stop, err = paginator.Next(resp)
+		if err != nil {
+			c.profiler.EmitError("Paginator Error", pageID, err.Error())
+			return fmt.Errorf("paginator update error: %w", err)
+		}
+
+		// Decode JSON response
+		var raw interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			c.profiler.EmitError("Response Decode Error", pageID, err.Error())
+			return fmt.Errorf("error decoding response JSON: %w", err)
+		}
+
+		// Emit PAGINATION_EVAL event (if pagination is configured and this is not the first page)
+		if pageNum > 0 && c.profiler.Enabled() && !stop {
+			afterPageState := map[string]any{
+				"pageNumber": paginator.PageNum(),
+				"params": map[string]any{
+					"queryParams": next.QueryParams,
+					"bodyParams":  next.BodyParams,
+				},
+				"nextPageUrl": next.NextPageUrl,
+			}
+
+			c.profiler.EmitPaginationEval(pageID, exec.step, PaginationEvalData{
+				PageNumber:           pageNum,
+				PaginationConfig:     exec.step.Request.Pagination,
+				PreviousResponseBody: previousResponseBody,
+				PreviousHeaders:      previousResponseHeaders,
+				PreviousState:        previousPageState,
+				AfterState:           afterPageState,
+			})
+		}
+
+		// Emit REQUEST_RESPONSE event (only compute data if profiler enabled)
+		if c.profiler.Enabled() {
+			responseHeaders := make(map[string]string)
+			for k, v := range resp.Header {
+				if len(v) > 0 {
+					responseHeaders[k] = v[0]
+				}
+			}
+
+			c.profiler.EmitRequestResponse(pageID, exec.step, ResponseData{
+				StatusCode:   resp.StatusCode,
+				Headers:      responseHeaders,
+				Body:         raw,
+				ResponseSize: responseSize,
+				DurationMs:   durationMs,
+			})
+		}
+
+		// Store response for next PAGINATION_EVAL event (only if profiling)
+		if c.profiler.Enabled() {
+			previousResponseBody = raw
+			previousResponseHeaders = make(map[string]string)
+			for k, v := range resp.Header {
+				if len(v) > 0 {
+					previousResponseHeaders[k] = v[0]
+				}
+			}
+		}
+
+		// Transform response
+		transformed, err := c.transformResult(raw, exec.step.ResultTransformer, templateCtx)
+		if err != nil {
+			c.profiler.EmitError("Response Transform Error", pageID, err.Error())
+			return err
+		}
+
+		// Emit RESPONSE_TRANSFORM event
+		c.profiler.EmitResponseTransform(pageID, exec.step, exec.step.ResultTransformer, raw, transformed)
+
+		// Execute nested steps on transformed result
+		// Note: request steps create a working context for the response data.
+		// If the current context is canonical (like "root"), the working context
+		// uses a unique key to avoid shadowing the original.
+		cloneResult := childMapWithClonedContext(exec.contextMap, exec.currentContext, transformed, c.ContextMap)
+		childContextMap := cloneResult.contextMap
+		workingContextKey := cloneResult.workingKey
+
+		// Emit CONTEXT_SELECTION event (context created for nested steps)
+		if len(exec.step.Steps) > 0 {
+			c.profiler.EmitContextSelection(pageID, exec.step, workingContextKey, childContextMap)
+		}
+
+		for _, step := range exec.step.Steps {
+			newExec := newStepExecution(step, workingContextKey, childContextMap, pageID)
+			if err := c.ExecuteStep(ctx, newExec); err != nil {
+				return err
+			}
+		}
+
+		// Get final result after nested steps from the working context
+		transformed = childContextMap[workingContextKey].Data
+
+		// Apply merge strategy
+		mergeOp := mergeOperation{
+			step:            exec.step,
+			currentContext:  exec.currentContext,
+			contextMap:      exec.contextMap,
+			result:          transformed,
+			templateContext: templateCtx,
+		}
+
+		// Capture data before merge (only if profiling)
+		dataBefore := c.profiler.CaptureContextDataBefore(exec.currentContext)
+
+		mergeStepName, err := c.performMerge(mergeOp)
+		if err != nil {
+			c.profiler.EmitError("Merge Error", pageID, err.Error())
+			return err
+		}
+
+		// Emit CONTEXT_MERGE event if merge happened
+		if mergeStepName != "" && c.profiler.Enabled() {
+			// Determine merge rule and target context
+			mergeRule := ""
+			currentContextKey := exec.currentContext.key
+			targetContextKey := exec.currentContext.key
+
 			if exec.step.MergeOn != "" {
-				c.logger.Debug("[Request] merging-on with expression: %s", exec.step.MergeOn)
-				templateCtx := contextMapToTemplate(exec.contextMap)
-
-				// Simple jq merge on current context
-				updated, err := applyMergeRule(c, exec.currentContext.Data, exec.step.MergeOn, transformed, templateCtx)
-				if err != nil {
-					return fmt.Errorf("mergeOn failed: %w", err)
-				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-On", exec, updated, exec.currentContext.Data, "url", urlObj.String())
-				exec.currentContext.Data = updated
+				mergeRule = exec.step.MergeOn
 			} else if exec.step.MergeWithParentOn != "" {
-				c.logger.Debug("[Request] merging-with-parent with expression: %s", exec.step.MergeWithParentOn)
-				templateCtx := contextMapToTemplate(exec.contextMap)
-
-				parentCtx := exec.contextMap[exec.currentContext.ParentContext]
-				// Simple jq merge on current context
-				updated, err := applyMergeRule(c, parentCtx.Data, exec.step.MergeWithParentOn, transformed, templateCtx)
-				if err != nil {
-					return fmt.Errorf("mergeWithParentOn failed: %w", err)
-				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-Parent", exec, updated, parentCtx.Data, "url", urlObj.String())
-				parentCtx.Data = updated
+				mergeRule = exec.step.MergeWithParentOn
+				targetContextKey = exec.currentContext.ParentContext
 			} else if exec.step.MergeWithContext != nil {
-				c.logger.Debug("[Request] merging-with-context with expression: %s:%s",
-					exec.step.MergeWithContext.Name, exec.step.MergeWithContext.Rule)
+				mergeRule = exec.step.MergeWithContext.Rule
+				targetContextKey = exec.step.MergeWithContext.Name
+			}
 
-				templateCtx := contextMapToTemplate(exec.contextMap)
-				// 2. Named context merge (cross-scope update)
-				targetCtx, ok := exec.contextMap[exec.step.MergeWithContext.Name]
-				if !ok {
-					return fmt.Errorf("context '%s' not found", exec.step.MergeWithContext.Name)
-				}
-				updated, err := applyMergeRule(c, targetCtx.Data, exec.step.MergeWithContext.Rule, transformed, templateCtx)
-				if err != nil {
-					return fmt.Errorf("mergeWithContext failed: %w", err)
-				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-Context", exec, updated, targetCtx.Data, "url", urlObj.String())
-				targetCtx.Data = updated
-			} else {
-				c.logger.Debug("[Request] default merge")
+			dataAfter := c.profiler.CaptureContextDataAfter(exec.currentContext)
 
-				// 3. Simple assignment (shallow)
-				switch data := exec.currentContext.Data.(type) {
-				case []interface{}:
-					exec.currentContext.Data = append(data, transformed.([]interface{})...) // Reassigns to field of original struct
-				case map[string]interface{}:
-					if transformedMap, ok := transformed.(map[string]interface{}); ok {
-						for k, v := range transformedMap {
-							data[k] = v // Modifies in-place
-						}
-					}
-				default:
-					exec.currentContext.Data = transformed
+			c.profiler.EmitContextMerge(pageID, exec.step, MergeEventData{
+				CurrentContextKey:   currentContextKey,
+				TargetContextKey:    targetContextKey,
+				MergeRule:           mergeRule,
+				TargetContextBefore: dataBefore,
+				TargetContextAfter:  dataAfter,
+				ContextMap:          exec.contextMap,
+			})
+		}
+
+		// Handle streaming at root level
+		if exec.currentContext.depth == 0 && c.Config.Stream {
+			array_data := exec.currentContext.Data.([]interface{})
+			for i, d := range array_data {
+				c.DataStream <- d
+				c.profiler.EmitStreamResult(pageID, exec.step, d, i)
+			}
+			exec.currentContext.Data = []interface{}{}
+		}
+
+		// Emit REQUEST_PAGE_END event
+		c.profiler.EmitRequestPageEnd(pageID, stepID, exec.step, pageNum, pageStartTime)
+	}
+
+	// Emit REQUEST_STEP_END event
+	c.profiler.EmitRequestStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
+
+	return nil
+}
+
+// executeForEachIteration executes a single forEach iteration
+func (c *ApiCrawler) executeForEachIteration(
+	ctx context.Context,
+	index int,
+	item any,
+	exec *stepExecution,
+	stepID string,
+	workerID int,
+	workerPoolID string,
+) forEachResult {
+	result := forEachResult{
+		index:          index,
+		profilerEvents: make([]StepProfilerData, 0),
+	}
+
+	c.logger.Info("[ForEach] Iteration %d as '%s'", index, exec.step.As, "item", item)
+
+	childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
+
+	// Emit CONTEXT_SELECTION event with worker tracking (context created for iteration)
+	c.profiler.EmitContextSelectionWithWorker(stepID, exec.step, exec.step.As, childContextMap, workerID, workerPoolID)
+
+	// Emit ITEM_SELECTION event with worker tracking
+	itemID := c.profiler.EmitItemSelectionWithWorker(stepID, exec.step, index, item, exec.step.As, childContextMap[exec.step.As].Data, workerID, workerPoolID)
+
+	// Execute nested steps
+	for _, nested := range exec.step.Steps {
+		newExec := newStepExecution(nested, exec.step.As, childContextMap, itemID)
+		if err := c.ExecuteStep(ctx, newExec); err != nil {
+			result.err = err
+			return result
+		}
+	}
+
+	result.result = childContextMap[exec.step.As].Data
+
+	return result
+}
+
+// executeForEachParallel executes forEach iterations in parallel
+func (c *ApiCrawler) executeForEachParallel(
+	ctx context.Context,
+	exec *stepExecution,
+	items []interface{},
+	maxConcurrency int,
+	rateLimiter *rate.Limiter,
+	stepID string,
+) ([]interface{}, error) {
+	profilerEnabled := c.profiler.Enabled()
+	numItems := len(items)
+
+	// Results channel sized to hold all results
+	resultsChan := make(chan forEachResult, numItems)
+
+	// Error group for managing goroutines
+	var wg sync.WaitGroup
+
+	// Semaphore for concurrency control
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	// Launch workers for each item
+	for i, item := range items {
+		wg.Add(1)
+
+		go func(index int, item any, threadID int) {
+			defer wg.Done()
+
+			// Acquire semaphore slot
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				resultsChan <- forEachResult{index: index, err: ctx.Err()}
+				return
+			default:
+			}
+
+			// Apply rate limiting if configured
+			if rateLimiter != nil {
+				if err := rateLimiter.Wait(ctx); err != nil {
+					resultsChan <- forEachResult{index: index, err: err}
+					return
 				}
 			}
 
-			c.pushProfilerData(STEP_PROFILER_TYPE_END_SILENT, "", nil, nil, nil)
+			// Execute iteration
+			workerPoolID := stepID + "-pool"
+			result := c.executeForEachIteration(ctx, index, item, exec, stepID, threadID, workerPoolID)
+			result.threadID = threadID
+			resultsChan <- result
+		}(i, item, i%maxConcurrency)
+	}
 
-			// at this point all inner steps have been executed for all entries in this call
-			// the tree has been completely retrieved and we can check the stream
-			if exec.currentContext.depth == 0 && c.Config.Stream {
-				// No need to check conversion since rootContext is enforced to be an array
-				array_data := exec.currentContext.Data.([]interface{})
-				for i, d := range array_data {
-					c.DataStream <- d
-					c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Stream result #%d", i), exec, d, nil, "url", urlObj.String())
-				}
+	// Close results channel when all workers complete
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
 
-				// reset data
-				exec.currentContext.Data = []interface{}{}
+	// Collect results and maintain order
+	results := make([]forEachResult, numItems)
+	for result := range resultsChan {
+		if result.err != nil {
+			return nil, result.err
+		}
+		results[result.index] = result
+	}
+
+	// Emit profiler events in order if profiling is enabled
+	if profilerEnabled {
+		for _, result := range results {
+			for _, event := range result.profilerEvents {
+				c.profiler.emit(event)
 			}
 		}
 	}
 
-	return nil
+	// Extract execution results in order
+	executionResults := make([]interface{}, numItems)
+	for i, result := range results {
+		executionResults[i] = result.result
+	}
+
+	return executionResults, nil
 }
 
 func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) error {
 	c.logger.Info("[Foreach] Preparing %s", exec.step.Name)
 
+	// Emit FOREACH_STEP_START event
+	stepStartTime := time.Now()
+	stepID := c.profiler.EmitForEachStepStart(exec.step, exec.parentID)
+
 	results := []interface{}{}
 
-	if len(exec.step.Path) != 0 && exec.step.Values == nil {
+	// Extract items to iterate over from path (forEach always uses path, validation ensures this)
+	if len(exec.step.Path) != 0 {
 		c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
 
 		code, err := c.getOrCompileJQRule(exec.step.Path)
 		if err != nil {
+			c.profiler.EmitError("Path Extraction Error", stepID, err.Error())
 			return fmt.Errorf("failed to get/compile jq path: %w", err)
 		}
 
@@ -630,86 +793,206 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 				results = arr
 			}
 		}
-	} else if exec.step.Values != nil {
-		c.logger.Debug("[Foreach] using values over path: %s, values %+v", exec.step.Path, exec.step.Values)
-
-		for _, v := range exec.step.Values {
-			results = append(results, map[string]interface{}{"value": v})
-		}
 	}
 
-	profileStepName := fmt.Sprintf("Foreach Extract '%s'", exec.step.Name)
-	c.pushProfilerData(STEP_PROFILER_TYPE_START, profileStepName, exec, results, nil)
+	// Determine execution mode and parameters
+	var executionResults []interface{}
+	var err error
 
-	executionResults := make([]interface{}, 0)
-	for i, item := range results {
-		// context cancelation handling
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	if exec.step.Parallelism != nil {
+		// Determine max concurrency (step setting or default)
+		maxConcurrency := exec.step.Parallelism.MaxConcurrency
+		if maxConcurrency == 0 {
+			maxConcurrency = 10 // Default concurrency
+		}
+
+		// Create rate limiter if configured
+		var rateLimiter *rate.Limiter
+		if exec.step.Parallelism.RequestsPerSecond > 0 {
+			burst := exec.step.Parallelism.Burst
+			if burst == 0 {
+				burst = 1 // Default burst
+			}
+			rateLimiter = rate.NewLimiter(rate.Limit(exec.step.Parallelism.RequestsPerSecond), burst)
+		}
+
+		// Emit PARALLELISM_SETUP event
+		if c.profiler.Enabled() {
+			workerPoolID := stepID + "-pool"
+			workerIDs := make([]int, maxConcurrency)
+			for i := 0; i < maxConcurrency; i++ {
+				workerIDs[i] = i
+			}
+
+			var rateLimit float64
+			var burst int
+			if rateLimiter != nil {
+				rateLimit = exec.step.Parallelism.RequestsPerSecond
+				burst = exec.step.Parallelism.Burst
+			}
+
+			c.profiler.EmitParallelismSetup(stepID, exec.step, ParallelismSetupData{
+				MaxConcurrency: maxConcurrency,
+				WorkerPoolID:   workerPoolID,
+				WorkerIDs:      workerIDs,
+				RateLimit:      rateLimit,
+				Burst:          burst,
+			})
+		}
+
+		c.logger.Info("[ForEach] Executing %d iterations in parallel (max concurrency: %d)", len(results), maxConcurrency)
+
+		// Execute in parallel
+		executionResults, err = c.executeForEachParallel(ctx, exec, results, maxConcurrency, rateLimiter, stepID)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Execute sequentially (original behavior)
+		executionResults = make([]interface{}, 0)
+		for i, item := range results {
+			// Check for context cancellation
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			c.logger.Info("[ForEach] Iteration %d as '%s'", i, exec.step.As, "item", item)
 
 			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
 
-			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Selection #%d", i), exec, item, nil)
+			// Emit CONTEXT_SELECTION event (context created for iteration)
+			c.profiler.EmitContextSelection(stepID, exec.step, exec.step.As, childContextMap)
+
+			// Emit ITEM_SELECTION event
+			itemID := c.profiler.EmitItemSelection(stepID, exec.step, i, item, exec.step.As, childContextMap[exec.step.As].Data)
 
 			for _, nested := range exec.step.Steps {
-				newExec := newStepExecution(nested, exec.step.As, childContextMap)
+				newExec := newStepExecution(nested, exec.step.As, childContextMap, itemID)
 				if err := c.ExecuteStep(ctx, newExec); err != nil {
 					return err
 				}
 			}
 
-			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Result #%d", i), exec, childContextMap[exec.step.As].Data, nil)
 			executionResults = append(executionResults, childContextMap[exec.step.As].Data)
 		}
 	}
 
-	// We need to path the context with the result of the nested data.
-	// This has to be done only if we are using path selector, foreach with hadcoded values already merge with some othe context
-	code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
-	if err != nil {
-		return fmt.Errorf("failed to get/compile merge rule: %w", err)
+	// Determine merge strategy
+	templateCtx := contextMapToTemplate(exec.contextMap)
+
+	// Check if custom merge rules are specified
+	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil || exec.step.NoopMerge
+
+	if hasCustomMerge {
+		// Use custom merge logic (same as request steps)
+		mergeOp := mergeOperation{
+			step:            exec.step,
+			currentContext:  exec.currentContext,
+			contextMap:      exec.contextMap,
+			result:          executionResults,
+			templateContext: templateCtx,
+		}
+
+		_, err := c.performMerge(mergeOp)
+		if err != nil {
+			c.profiler.EmitError("Merge Error", stepID, err.Error())
+			return err
+		}
+
+	} else /*if exec.step.Path != ""*/ {
+		// Default: patch the array at exec.step.Path with new results
+		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
+		if err != nil {
+			c.profiler.EmitError("Merge Error", stepID, err.Error())
+			return fmt.Errorf("failed to get/compile merge rule: %w", err)
+		}
+
+		iter := code.Run(exec.currentContext.Data, executionResults)
+
+		v, ok := iter.Next()
+		if !ok {
+			return fmt.Errorf("patch yielded nothing")
+		}
+		if err, isErr := v.(error); isErr {
+			return err
+		}
+
+		exec.currentContext.Data = v
 	}
+	// If Path is empty (using values) and no custom merge, skip merge
+	// The nested steps are expected to handle merging
 
-	// Run the query against contextData, passing $new as a variable
-	iter := code.Run(exec.currentContext.Data, executionResults)
-
-	v, ok := iter.Next()
-	if !ok {
-		return fmt.Errorf("patch yielded nothing")
-	}
-	if err, isErr := v.(error); isErr {
-		return err
-	}
-
-	profileStepName = fmt.Sprintf("Foreach Merge '%s'", exec.step.Name)
-	c.pushProfilerData(STEP_PROFILER_TYPE_END, profileStepName, exec, v, exec.currentContext.Data)
-
-	// Assign new patched data
-	exec.currentContext.Data = v
-
-	// at this point all inner steps have been executed for all entries in this call
-	// the tree has been completely retrieved and we can check the stream
+	// Handle streaming at root level
 	if exec.currentContext.depth <= 1 && c.Config.Stream {
-		// No need to check conversion since rootContext is enforced to be an array
 		array_data := exec.currentContext.Data.([]interface{})
 		for i, d := range array_data {
 			c.DataStream <- d
-			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Stream result #%d", i), exec, d, nil)
+			c.profiler.EmitStreamResult(stepID, exec.step, d, i)
 		}
-
-		// reset data
 		exec.currentContext.Data = []interface{}{}
 	}
+
+	// Emit FOREACH_STEP_END event
+	c.profiler.EmitForEachStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
+
+	return nil
+}
+
+// handleForValues iterates over literal values and creates an overlay context for each.
+// Unlike forEach, forValues:
+// - Only accepts literal values (no path extraction)
+// - Creates overlay context (value assigned directly to 'as' key, no .value wrapper)
+// - Does NOT merge results back - nested steps handle their own merging
+// - Preserves parent context accessibility
+func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) error {
+	c.logger.Info("[ForValues] Preparing %s", exec.step.Name)
+
+	// Emit FORVALUES_STEP_START event
+	stepStartTime := time.Now()
+	stepID := c.profiler.EmitForValuesStepStart(exec.step, exec.parentID)
+
+	// Iterate over values
+	for i, value := range exec.step.Values {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		c.logger.Info("[ForValues] Iteration %d as '%s' = %v", i, exec.step.As, value)
+
+		// Create overlay context map - value is assigned directly (no .value wrapper)
+		// This preserves parent context while adding the new value
+		childContextMap := childMapWithOverlay(exec.contextMap, exec.currentContext, exec.step.As, value)
+
+		// Emit CONTEXT_SELECTION event
+		c.profiler.EmitContextSelection(stepID, exec.step, exec.step.As, childContextMap)
+
+		// Emit ITEM_SELECTION event (for forValues, use value selection)
+		itemID := c.profiler.EmitValueSelection(stepID, exec.step, i, value, exec.step.As)
+
+		// Execute nested steps with overlay context
+		// Nested steps operate in parent context but have access to the value via 'as' key
+		for _, nested := range exec.step.Steps {
+			newExec := newStepExecution(nested, exec.currentContextKey, childContextMap, itemID)
+			if err := c.ExecuteStep(ctx, newExec); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Emit FORVALUES_STEP_END event
+	c.profiler.EmitForValuesStepEnd(stepID, exec.parentID, exec.step, stepStartTime)
 
 	return nil
 }
 
 func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, templateCtx map[string]any) (interface{}, error) {
 	// Parse the JQ expression
-	code, err := c.getOrCompileJQRule(rule, "$res", "$ctx")
+	code, err := c.getOrCompileJQRule(rule, JQ_RES_KEY, JQ_CTX_KEY)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
 	}
@@ -738,6 +1021,212 @@ func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, tem
 	return values[0], nil
 }
 
+// performMerge applies the appropriate merge strategy based on step configuration
+// Returns the profiler step name and error if any. The actual context is modified in place.
+// Thread-safe: Uses mutex to protect concurrent access to contexts.
+func (c *ApiCrawler) performMerge(op mergeOperation) (profilerStepName string, err error) {
+	// Lock for thread-safe merge operations
+	c.mergeMutex.Lock()
+	defer c.mergeMutex.Unlock()
+
+	// Check for noop merge (skip merging entirely)
+	if op.step.NoopMerge {
+		c.logger.Debug("[Merge] noop merge - skipping")
+		return "", nil
+	}
+
+	// 1. Explicit merge rule (merge with ancestor context)
+	if op.step.MergeOn != "" {
+		c.logger.Debug("[Merge] merging-on with expression: %s", op.step.MergeOn)
+		updated, err := applyMergeRule(c, op.currentContext.Data, op.step.MergeOn, op.result, op.templateContext)
+		if err != nil {
+			return "", fmt.Errorf("mergeOn failed: %w", err)
+		}
+		op.currentContext.Data = updated
+		return "Merge-On", nil
+	}
+
+	// 2. Merge with parent context
+	if op.step.MergeWithParentOn != "" {
+		c.logger.Debug("[Merge] merging-with-parent with expression: %s", op.step.MergeWithParentOn)
+		parentCtx := op.contextMap[op.currentContext.ParentContext]
+		updated, err := applyMergeRule(c, parentCtx.Data, op.step.MergeWithParentOn, op.result, op.templateContext)
+		if err != nil {
+			return "", fmt.Errorf("mergeWithParentOn failed: %w", err)
+		}
+		parentCtx.Data = updated
+		return "Merge-Parent", nil
+	}
+
+	// 3. Named context merge (cross-scope update)
+	// Note: Since childMapWithClonedContext now uses unique working keys for
+	// canonical contexts (like "root"), the original canonical contexts are
+	// preserved in the context map and can be found by name.
+	if op.step.MergeWithContext != nil {
+		c.logger.Debug("[Merge] merging-with-context with expression: %s:%s",
+			op.step.MergeWithContext.Name, op.step.MergeWithContext.Rule)
+
+		targetCtx, ok := op.contextMap[op.step.MergeWithContext.Name]
+		if !ok {
+			return "", fmt.Errorf("context '%s' not found", op.step.MergeWithContext.Name)
+		}
+		updated, err := applyMergeRule(c, targetCtx.Data, op.step.MergeWithContext.Rule, op.result, op.templateContext)
+		if err != nil {
+			return "", fmt.Errorf("mergeWithContext failed: %w", err)
+		}
+		targetCtx.Data = updated
+		return "Merge-Context", nil
+	}
+
+	// 4. Default merge (shallow merge for maps/arrays)
+	c.logger.Debug("[Merge] default merge")
+	switch data := op.currentContext.Data.(type) {
+	case []interface{}:
+		op.currentContext.Data = append(data, op.result.([]interface{})...)
+	case map[string]interface{}:
+		if transformedMap, ok := op.result.(map[string]interface{}); ok {
+			for k, v := range transformedMap {
+				data[k] = v
+			}
+		}
+	default:
+		op.currentContext.Data = op.result
+	}
+	return "Merge-Default", nil
+}
+
+// prepareHTTPRequest builds an HTTP request from the context and pagination parameters
+func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[string]any, globalHeaders map[string]string) (*http.Request, *url.URL, error) {
+	var urlObj *url.URL
+	var err error
+
+	// Determine base URL
+	if ctx.nextPageURL != "" {
+		urlObj, err = url.Parse(ctx.nextPageURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid nextPageURL %s: %w", ctx.nextPageURL, err)
+		}
+	} else {
+		// Template URL expansion
+		tmpl, err := c.getOrCompileTemplate(ctx.urlTemplate)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error getting/compiling URL template: %w", err)
+		}
+
+		var urlBuf bytes.Buffer
+		if err := tmpl.Execute(&urlBuf, templateCtx); err != nil {
+			return nil, nil, fmt.Errorf("error executing URL template: %w", err)
+		}
+
+		urlObj, err = url.Parse(urlBuf.String())
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid URL %s: %w", urlBuf.String(), err)
+		}
+	}
+
+	// Add query parameters
+	query := urlObj.Query()
+	for k, v := range ctx.queryParams {
+		query.Set(k, v)
+	}
+	urlObj.RawQuery = query.Encode()
+
+	// Merge configured body with pagination body params
+	mergedBody := make(map[string]any)
+	for k, v := range ctx.configuredBody {
+		mergedBody[k] = v
+	}
+	for k, v := range ctx.bodyParams {
+		mergedBody[k] = v
+	}
+
+	// Determine content type
+	contentType := ctx.contentType
+
+	// Prepare request body based on content type
+	var reqBody io.Reader
+	if len(mergedBody) > 0 {
+		switch contentType {
+		case "application/json":
+			bodyJSON, err := json.Marshal(mergedBody)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error encoding JSON body: %w", err)
+			}
+			reqBody = bytes.NewReader(bodyJSON)
+
+		case "application/x-www-form-urlencoded":
+			formData := url.Values{}
+			for k, v := range mergedBody {
+				formData.Set(k, fmt.Sprintf("%v", v))
+			}
+			reqBody = bytes.NewReader([]byte(formData.Encode()))
+
+		default:
+			return nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
+		}
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest(ctx.method, urlObj.String(), reqBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating HTTP request: %w", err)
+	}
+
+	// Apply headers (priority: global < request-specific < pagination)
+	for k, v := range globalHeaders {
+		req.Header.Set(k, v)
+	}
+	for k, v := range ctx.headers {
+		req.Header.Set(k, v)
+	}
+
+	// Set Content-Type header if body is present
+	if len(mergedBody) > 0 && contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// Apply authentication
+	ctx.authenticator.PrepareRequest(req, ctx.requestID)
+
+	return req, urlObj, nil
+}
+
+// transformResult applies the jq transformer to the raw response
+func (c *ApiCrawler) transformResult(raw any, transformer string, templateCtx map[string]any) (any, error) {
+	if transformer == "" {
+		return raw, nil
+	}
+
+	c.logger.Debug("[Transform] transforming with expression: %s", transformer)
+
+	code, err := c.getOrCompileJQRule(transformer, JQ_CTX_KEY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get/compile transform rule: %w", err)
+	}
+
+	iter := code.Run(raw, templateCtx)
+	var singleResult interface{}
+	count := 0
+
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, isErr := v.(error); isErr {
+			return nil, fmt.Errorf("jq error: %w", err)
+		}
+
+		count++
+		if count > 1 {
+			return nil, fmt.Errorf("resultTransformer yielded more than one value")
+		}
+
+		singleResult = v
+	}
+	return singleResult, nil
+}
+
 func childMapWith(base map[string]*Context, currentCotnext *Context, key string, value interface{}) map[string]*Context {
 	newMap := make(map[string]*Context, len(base)+1)
 	for k, v := range base {
@@ -752,20 +1241,98 @@ func childMapWith(base map[string]*Context, currentCotnext *Context, key string,
 	return newMap
 }
 
+// childMapWithOverlay creates an overlay context for forValues.
+// Unlike childMapWith, this:
+// - Assigns the value directly (no wrapper)
+// - Keeps the same parent reference (overlay, not child)
+// - Nested steps operate on the PARENT context but have access to the value via 'as' key
+func childMapWithOverlay(base map[string]*Context, currentContext *Context, key string, value interface{}) map[string]*Context {
+	newMap := make(map[string]*Context, len(base)+1)
+	for k, v := range base {
+		newMap[k] = v
+	}
+	// Create overlay context - same depth as parent, parent points to parent's parent
+	newMap[key] = &Context{
+		Data:          value, // Value assigned directly, no wrapper
+		ParentContext: currentContext.ParentContext,
+		key:           key,
+		depth:         currentContext.depth, // Same depth - it's an overlay, not a child
+	}
+	return newMap
+}
+
+// clonedContextResult holds the result of cloning a context, including
+// the new context map and the key where the working context was placed
+type clonedContextResult struct {
+	contextMap map[string]*Context
+	workingKey string // The key where the cloned/working context is stored
+}
+
+// childMapWithClonedContext creates a new context map with a cloned working context.
+// If the current context is a canonical context (exists in canonicalMap), the clone
+// is stored under a unique working key to avoid shadowing the original.
+// This ensures that mergeWithContext can always find the original canonical contexts.
+func childMapWithClonedContext(base map[string]*Context, currentContext *Context, value interface{}, canonicalMap map[string]*Context) clonedContextResult {
+	newMap := make(map[string]*Context, len(base)+2)
+
+	// Copy all existing contexts
+	for k, v := range base {
+		newMap[k] = v
+	}
+
+	// Determine the working key - if current context is canonical, use a unique key
+	workingKey := currentContext.key
+	if _, isCanonical := canonicalMap[currentContext.key]; isCanonical {
+		// Create a unique working key that won't shadow the canonical context
+		workingKey = "_response_" + currentContext.key
+	}
+
+	// Create the working context with the response data
+	newMap[workingKey] = &Context{
+		Data:          value,
+		ParentContext: currentContext.key, // Parent is the original context
+		key:           workingKey,
+		depth:         currentContext.depth + 1,
+	}
+
+	return clonedContextResult{
+		contextMap: newMap,
+		workingKey: workingKey,
+	}
+}
+
 func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
 	result := make(map[string]interface{})
-	// root special case
-	if rootMap, ok := base["root"].Data.(map[string]interface{}); ok {
-		for k, v := range rootMap {
-			result[k] = v
+
+	// First pass: add all contexts by their key
+	for k, c := range base {
+		result[k] = c.Data
+	}
+
+	// Second pass: spread map data from special contexts into top level
+	// This allows templates to access fields directly (e.g., {{ .FacilityId }})
+	// Priority: _response_* contexts first (most specific), then root
+	for k, c := range base {
+		// Spread _response_* context data (working contexts from request steps)
+		if len(k) > 10 && k[:10] == "_response_" {
+			if dataMap, ok := c.Data.(map[string]interface{}); ok {
+				for field, v := range dataMap {
+					result[field] = v
+				}
+			}
 		}
 	}
 
-	for k, c := range base {
-		if k == "root" {
-			continue
+	// Finally spread root context data (lowest priority, won't overwrite)
+	if rootCtx, ok := base["root"]; ok {
+		if rootMap, ok := rootCtx.Data.(map[string]interface{}); ok {
+			for k, v := range rootMap {
+				if _, exists := result[k]; !exists {
+					result[k] = v
+				}
+			}
 		}
-		result[k] = c.Data
 	}
+
 	return result
 }

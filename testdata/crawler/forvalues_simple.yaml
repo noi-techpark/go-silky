@@ -1,0 +1,20 @@
+# Test: Simple forValues iteration
+# Demonstrates basic forValues usage - iterate over literal values
+# and merge results into root using dynamic keys
+
+rootContext: {}
+
+steps:
+  - type: forValues
+    name: "Iterate over languages"
+    values: ["en", "de", "it"]
+    as: lang
+    steps:
+      - type: request
+        name: "Fetch translations"
+        request:
+          url: "https://api.example.com/translations?lang={{ .lang }}"
+          method: GET
+        resultTransformer: .translations
+        # Merge into root with dynamic key from forValues
+        mergeOn: .[$ctx.lang] = $res

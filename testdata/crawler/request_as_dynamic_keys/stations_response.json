@@ -1,0 +1,6 @@
+{
+  "stations": [
+    {"id": "station-1", "name": "Central Station", "address": "123 Main St"},
+    {"id": "station-2", "name": "North Terminal", "address": "456 North Ave"}
+  ]
+}

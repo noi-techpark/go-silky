@@ -1,0 +1,22 @@
+# Test: Basic Authentication
+# This test verifies HTTP Basic Auth with username and password
+# The authenticator automatically encodes credentials in Base64 and adds Authorization header
+
+rootContext: []
+
+# Global auth configuration using HTTP Basic Authentication
+auth:
+  type: basic
+  username: testuser
+  password: testpass123
+
+steps:
+  - type: request
+    name: "Fetch protected API data"
+    request:
+      url: https://api.example.com/v1/users
+      method: GET
+      headers:
+        Accept: application/json
+    # Transform response to extract user list
+    resultTransformer: .users

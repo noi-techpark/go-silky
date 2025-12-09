@@ -1,0 +1,32 @@
+# Test: Parallel execution with noopMerge and nested mergeWithParentOn
+# Demonstrates: using noopMerge at forEach level with nested steps doing the merge
+
+# Start with object containing empty items array
+rootContext: {"items": []}
+
+# Use a preliminary step to set up the values in root context
+steps:
+  # First, create a temporary array with values to iterate
+  - type: request
+    name: Initialize values
+    request:
+      url: "https://api.example.com/init"
+      method: GET
+    resultTransformer: '[1, 2, 3]'
+    mergeOn: '.iterValues = $res'
+
+  - type: forEach
+    path: .iterValues
+    as: id
+    parallelism:
+      maxConcurrency: 3
+    noopMerge: true
+    steps:
+      - type: request
+        name: Get Item
+        request:
+          url: "https://api.example.com/items/{{ .id }}"
+          method: GET
+        mergeWithContext:
+          name: root
+          rule: ".items += [$res]"

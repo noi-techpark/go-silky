@@ -1,5 +1,9 @@
+# Test: Next-URL-based pagination
+# Demonstrates: pagination using nextPageUrlSelector to follow "next" links
+
+# Start with empty array
 rootContext: []
-  
+
 steps:
   - type: request
     name: Fetch Facilities
@@ -10,8 +14,12 @@ steps:
         Accept: application/json
       body:
 
+      # Next-URL pagination: API returns URL for next page in response
       pagination:
+        # jq expression to extract next page URL from response body
+        # Format: "body:.nextpage" means "extract .nextpage from response body"
         nextPageUrlSelector: "body:.nextpage"
 
+    # Extract data array from each page's response
     resultTransformer: .data
     

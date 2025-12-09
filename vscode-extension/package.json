@@ -1,0 +1,242 @@
+{
+  "name": "silky-vscode",
+  "displayName": "Silky",
+  "description": "Development and debugging tool for Silky YAML configurations",
+  "version": "0.1.0",
+  "publisher": "noi-techpark",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Testing"
+  ],
+  "keywords": [
+    "api",
+    "crawler",
+    "yaml",
+    "debugging",
+    "testing"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml",
+    "workspaceContains:**/*.silky.yaml",
+    "onCommand:silky.run",
+    "onView:silky.stepsExplorer"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "silky.run",
+        "title": "Run Silky Configuration",
+        "icon": "$(play)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.stop",
+        "title": "Stop Execution",
+        "icon": "$(debug-stop)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.debug",
+        "title": "Debug Configuration",
+        "icon": "$(debug-alt)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.validateConfig",
+        "title": "Validate Configuration",
+        "icon": "$(check)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.exportSteps",
+        "title": "Export Execution Steps",
+        "icon": "$(export)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.collapseAllSteps",
+        "title": "Collapse All Steps",
+        "icon": "$(collapse-all)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.refreshSteps",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.showStepDetails",
+        "title": "Show Step Details",
+        "icon": "$(info)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.convertToSilkyYaml",
+        "title": "Convert to Silky YAML",
+        "category": "Silky"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.run",
+          "group": "navigation@1"
+        },
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.stop",
+          "group": "navigation@2"
+        },
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.validateConfig",
+          "group": "navigation@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "silky.refreshSteps",
+          "when": "view == silky.stepsExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "silky.collapseAllSteps",
+          "when": "view == silky.stepsExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "silky.exportSteps",
+          "when": "view == silky.stepsExplorer",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "silky.showStepDetails",
+          "when": "view == silky.stepsExplorer",
+          "group": "inline"
+        }
+      ]
+    },
+    "views": {
+      "silky": [
+        {
+          "id": "silky.stepsExplorer",
+          "name": "Execution Steps",
+          "icon": "$(list-tree)",
+          "contextualTitle": "Silky Steps"
+        }
+      ],
+      "silky-panel": [
+        {
+          "type": "webview",
+          "id": "silky.timeline",
+          "name": "Execution Timeline"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "silky",
+          "title": "Silky",
+          "icon": "resources/cobweb-spider-web.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "silky-panel",
+          "title": "Silky Timeline",
+          "icon": "$(graph-line)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Silky",
+      "properties": {
+        "silky.executable.path": {
+          "type": "string",
+          "default": "go",
+          "description": "Path to Go executable for running the crawler"
+        },
+        "silky.autoValidate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically validate configuration on save"
+        },
+        "silky.autoRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run crawler when configuration changes"
+        },
+        "silky.maxOutputSize": {
+          "type": "number",
+          "default": 10000,
+          "description": "Maximum number of lines to display in output (0 = unlimited)"
+        },
+        "silky.collapseSteps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Collapse all steps by default"
+        }
+      }
+    },
+    "yamlValidation": [
+      {
+        "fileMatch": [
+          "*.silky.yaml",
+          "*.silky.yml"
+        ],
+        "url": "./schemas/silky-schema.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "yaml",
+        "path": "./snippets/silky.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run build:binary:all",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build:binary": "node scripts/build-all-platforms.js",
+    "build:binary:all": "node scripts/build-all-platforms.js",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "npm run build:binary:all && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.19.0",
+    "eslint": "^8.40.0",
+    "typescript": "^5.1.0"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "jsdiff": "^1.1.1",
+    "yaml": "^2.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/noi-techpark/go-silky"
+  },
+  "license": "AGPL-3.0-or-later",
+  "icon": "icon.png",
+  "extensionDependencies": [
+    "redhat.vscode-yaml"
+  ]
+}

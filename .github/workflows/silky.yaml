@@ -1,4 +1,4 @@
-name: Go-Apigorowler Package CI
+name: Silky Package CI
 
 on:
   push:
@@ -6,9 +6,11 @@ on:
       - 'main'
     paths-ignore:
       - 'cmd/ide/**'
+      - 'cmd/cli/**'
   pull_request:
     paths-ignore:
       - 'cmd/ide/**'
+      - 'cmd/cli/**'
 
 jobs:
   reuse-check:

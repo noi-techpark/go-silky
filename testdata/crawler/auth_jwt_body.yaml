@@ -1,0 +1,30 @@
+# Test: JWT Authentication (Extract from Body)
+# This test performs login, extracts JWT token from response body using jq expression
+# The token is then injected as "Authorization: Bearer <jwt>" in subsequent requests
+
+rootContext: {}
+
+# JWT auth extracting token from response body
+auth:
+  type: jwt
+  loginRequest:
+    url: https://api.example.com/v1/auth/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      email: jwt@example.com
+      password: jwtpass456
+  # Extract from body using jq expression
+  extractFrom: body
+  extractSelector: .data.accessToken
+  # Refresh token after 30 minutes
+  maxAgeSeconds: 1800
+
+steps:
+  - type: request
+    name: "Get protected data"
+    request:
+      url: https://api.example.com/v1/protected/data
+      method: GET
+    resultTransformer: .data.records

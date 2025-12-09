@@ -1,1 +1,3 @@
 cmd/ide/out/*
+vscode-extension/bin
+CLAUDE.md

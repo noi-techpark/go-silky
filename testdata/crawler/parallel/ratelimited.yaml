@@ -1,0 +1,27 @@
+# Test: Parallel execution with rate limiting
+# Demonstrates: worker pool with rate limiter to control request throughput
+
+# Start with array of values to iterate over
+rootContext: [1, 2, 3]
+
+steps:
+  - type: forEach
+    path: .
+    as: id
+    # Parallel execution with rate limiting
+    parallelism:
+      # Maximum 2 concurrent workers
+      maxConcurrency: 2
+      # Rate limit: maximum 5 requests per second across all workers
+      # This prevents overwhelming the target API
+      requestsPerSecond: 5.0
+    steps:
+      - type: request
+        name: Get Item
+        request:
+          # Template uses current iteration value (id is the value from root array)
+          url: "https://api.example.com/items/{{ .id }}"
+          method: GET
+        resultTransformer: .
+        # Replace iteration context with result
+        mergeOn: ". = $res"

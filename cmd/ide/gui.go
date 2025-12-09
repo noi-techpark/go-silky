@@ -19,7 +19,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gdamore/tcell/v2"
-	"github.com/noi-techpark/go-apigorowler"
+	"github.com/noi-techpark/go-silky"
 	"github.com/rivo/tview"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/yaml.v3"
@@ -33,6 +33,137 @@ func escapeBrackets(input string) string {
 		"[", "[\u200B",
 		"]", "\u200B]",
 	).Replace(input)
+}
+
+func getEventTypeName(t silky.ProfileEventType) string {
+	names := map[silky.ProfileEventType]string{
+		silky.EVENT_ROOT_START:           "Root Start",
+		silky.EVENT_REQUEST_STEP_START:   "Request Step Start",
+		silky.EVENT_REQUEST_STEP_END:     "Request Step End",
+		silky.EVENT_CONTEXT_SELECTION:    "Context Selection",
+		silky.EVENT_REQUEST_PAGE_START:   "Request Page Start",
+		silky.EVENT_REQUEST_PAGE_END:     "Request Page End",
+		silky.EVENT_PAGINATION_EVAL:      "Pagination Evaluation",
+		silky.EVENT_URL_COMPOSITION:      "URL Composition",
+		silky.EVENT_REQUEST_DETAILS:      "Request Details",
+		silky.EVENT_REQUEST_RESPONSE:     "Request Response",
+		silky.EVENT_RESPONSE_TRANSFORM:   "Response Transform",
+		silky.EVENT_CONTEXT_MERGE:        "Context Merge",
+		silky.EVENT_FOREACH_STEP_START:   "ForEach Step Start",
+		silky.EVENT_FOREACH_STEP_END:     "ForEach Step End",
+		silky.EVENT_FORVALUES_STEP_START: "ForValues Step Start",
+		silky.EVENT_FORVALUES_STEP_END:   "ForValues Step End",
+		silky.EVENT_PARALLELISM_SETUP:    "Parallelism Setup",
+		silky.EVENT_ITEM_SELECTION:       "Item Selection",
+		silky.EVENT_AUTH_START:           "Auth Start",
+		silky.EVENT_AUTH_CACHED:          "Auth Cached",
+		silky.EVENT_AUTH_LOGIN_START:     "Auth Login Start",
+		silky.EVENT_AUTH_LOGIN_END:       "Auth Login End",
+		silky.EVENT_AUTH_TOKEN_EXTRACT:   "Token Extract",
+		silky.EVENT_AUTH_TOKEN_INJECT:    "Token Inject",
+		silky.EVENT_AUTH_END:             "Auth End",
+		silky.EVENT_RESULT:               "Result",
+		silky.EVENT_STREAM_RESULT:        "Stream Result",
+		silky.EVENT_ERROR:                "Error",
+	}
+	if name, ok := names[t]; ok {
+		return name
+	}
+	return fmt.Sprintf("Unknown (%d)", t)
+}
+
+func isContainerEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_ROOT_START ||
+		t == silky.EVENT_REQUEST_STEP_START ||
+		t == silky.EVENT_FOREACH_STEP_START ||
+		t == silky.EVENT_FORVALUES_STEP_START ||
+		t == silky.EVENT_REQUEST_PAGE_START ||
+		t == silky.EVENT_ITEM_SELECTION ||
+		t == silky.EVENT_AUTH_START ||
+		t == silky.EVENT_AUTH_LOGIN_START
+}
+
+func isStartEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_ROOT_START ||
+		t == silky.EVENT_REQUEST_STEP_START ||
+		t == silky.EVENT_FOREACH_STEP_START ||
+		t == silky.EVENT_FORVALUES_STEP_START ||
+		t == silky.EVENT_REQUEST_PAGE_START ||
+		t == silky.EVENT_AUTH_START ||
+		t == silky.EVENT_AUTH_LOGIN_START
+}
+
+func isEndEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_REQUEST_STEP_END ||
+		t == silky.EVENT_FOREACH_STEP_END ||
+		t == silky.EVENT_FORVALUES_STEP_END ||
+		t == silky.EVENT_REQUEST_PAGE_END ||
+		t == silky.EVENT_AUTH_END ||
+		t == silky.EVENT_AUTH_LOGIN_END
+}
+
+// hasContextMapData returns true if the event contains context/template map data
+func hasContextMapData(data silky.StepProfilerData) bool {
+	switch data.Type {
+	case silky.EVENT_URL_COMPOSITION:
+		_, ok := data.Data["goTemplateContext"]
+		return ok
+	case silky.EVENT_CONTEXT_SELECTION, silky.EVENT_CONTEXT_MERGE:
+		_, ok := data.Data["fullContextMap"]
+		return ok
+	}
+	return false
+}
+
+func getHelpText() string {
+	return `[yellow::b]Silky IDE - Keyboard Shortcuts[-:-:-]
+
+[green::b]Navigation (Vim-style)[-:-:-]
+  [yellow]j / ↓[-]         Move to next step in tree
+  [yellow]k / ↑[-]         Move to previous step in tree
+  [yellow]h / ←[-]         Collapse node OR go to parent
+  [yellow]l / →[-]         Expand node
+  [yellow]n[-]             Next sibling (same level)
+  [yellow]N[-]             Previous sibling (same level)
+  [yellow]p[-]             Jump to parent step
+  [yellow]g[-]             Jump to first step
+  [yellow]G[-]             Jump to last step
+  [yellow]Enter/Space[-]   Toggle expand/collapse
+
+[green::b]Tree Operations[-:-:-]
+  [yellow]e[-]             Expand all steps
+  [yellow]c[-]             Collapse all steps
+  [yellow]E[-]             Expand current subtree
+  [yellow]C[-]             Collapse current subtree
+
+[green::b]Diff View (Transform/Merge)[-:-:-]
+  [yellow]1[-]             Show "Before" data
+  [yellow]2[-]             Show "After" data
+  [yellow]3[-]             Show "Diff" (word-based)
+
+[green::b]Context Map View[-:-:-]
+  [yellow]m[-]             Open context/template map viewer (when available)
+  [yellow]/[-]             Search in context map (when viewer open)
+  [yellow]n[-]             Next search match
+  [yellow]N[-]             Previous search match
+  [yellow]Esc[-]           Close context map viewer
+
+[green::b]View Controls[-:-:-]
+  [yellow]Tab[-]           Switch focus between panels
+  [yellow]?[-]             Toggle this help panel
+  [yellow]d[-]             Dump steps to /out folder
+  [yellow]r[-]             Refresh/restart crawler
+
+[green::b]Execution[-:-:-]
+  [yellow]s[-]             Stop current execution
+  [yellow]Ctrl+C[-]        Stop execution & exit
+
+[green::b]Scrolling (when focused on Log/Details)[-:-:-]
+  [yellow]↑/↓[-]           Scroll line by line
+  [yellow]PgUp/PgDn[-]     Scroll page by page
+  [yellow]Home/End[-]      Jump to top/bottom
+
+[yellow]Press [::b]?[-:-:-] or [::b]Esc[-:-:-] to close this help`
 }
 
 // Generate a tview-color-tagged diff from before/after strings
@@ -92,12 +223,20 @@ type ConsoleApp struct {
 	selectedStep   int
 	mutex          sync.Mutex
 	execLog        *tview.TextView
-	description    *tview.TextView
-	stepOutput     *tview.TextView
+	stepDetails    *tview.TextView
 	steps          *tview.TreeView
+	statusBar      *tview.TextView
+	helpPanel      *tview.TextView
+	pages          *tview.Pages
+	mainLayout     *tview.Flex
 	configFilePath string
-	profilerData   []apigorowler.StepProfilerData
+	profilerData   []silky.StepProfilerData
 	stopFn         context.CancelFunc
+	// ID-based hierarchy tracking
+	nodeMap map[string]*tview.TreeNode
+	// Diff view state
+	currentDiffView  string // "before", "after", or "diff"
+	currentEventData silky.StepProfilerData
 }
 
 func recoverAndLog(logger ConsoleLogger) {
@@ -111,7 +250,8 @@ func NewConsoleApp() *ConsoleApp {
 	return &ConsoleApp{
 		app:          tview.NewApplication(),
 		selectedStep: 0,
-		profilerData: make([]apigorowler.StepProfilerData, 0),
+		profilerData: make([]silky.StepProfilerData, 0),
+		nodeMap:      make(map[string]*tview.TreeNode),
 	}
 }
 
@@ -164,81 +304,241 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		log.Fatal(err)
 	}
 
-	dumpButton := tview.NewButton("Dump Steps").
-		SetSelectedFunc(func() {
-			c.dumpStepsToLog()
-		})
-	dumpButton.SetBorder(true)
-
-	stopButton := tview.NewButton("Stop").
-		SetSelectedFunc(func() {
-			c.stopExec()
-		})
-	stopButton.SetBorder(true)
-
+	// Create UI components
 	c.execLog = tview.NewTextView()
 	c.execLog.SetDynamicColors(true)
 	c.execLog.SetScrollable(true)
 	c.execLog.SetBorder(true)
-	c.execLog.SetTitle("Execution Log")
+	c.execLog.SetTitle(" Execution Log ")
 
-	c.description = tview.NewTextView()
-	c.description.SetDynamicColors(true)
-	c.description.SetBorder(true)
-	c.description.SetTitle("Step Context")
+	c.stepDetails = tview.NewTextView()
+	c.stepDetails.SetDynamicColors(true)
+	c.stepDetails.SetScrollable(true)
+	c.stepDetails.SetBorder(true)
+	c.stepDetails.SetTitle(" Step Details ")
+	c.stepDetails.SetWrap(true)
 
-	c.stepOutput = tview.NewTextView()
-	c.stepOutput.SetDynamicColors(true)
-	c.stepOutput.SetScrollable(true)
-	c.stepOutput.SetBorder(true)
-	c.stepOutput.SetTitle("Output")
-
-	root := tview.NewTreeNode("").SetSelectable(false)
+	root := tview.NewTreeNode("Steps").SetSelectable(false)
 	c.steps = tview.NewTreeView().SetRoot(root)
 	c.steps.SetBorder(true)
-	c.steps.SetTitle("Steps")
+	c.steps.SetTitle(" Execution Steps ")
+
+	c.statusBar = tview.NewTextView()
+	c.statusBar.SetDynamicColors(true)
+	c.updateStatusBar()
+
+	c.helpPanel = tview.NewTextView()
+	c.helpPanel.SetDynamicColors(true)
+	c.helpPanel.SetBorder(true)
+	c.helpPanel.SetTitle(" Help ")
+	c.helpPanel.SetText(getHelpText())
 
 	c.app.EnableMouse(true)
 
-	c.stepOutput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		x, y := c.stepOutput.GetScrollOffset()
-		switch event.Key() {
-		case tcell.KeyUp:
-			c.stepOutput.ScrollTo(x, y-1)
-		case tcell.KeyDown:
-			c.stepOutput.ScrollTo(x, y+1)
-		case tcell.KeyPgUp:
-			c.stepOutput.ScrollTo(x, y-5)
-		case tcell.KeyPgDn:
-			c.stepOutput.ScrollTo(x, y+5)
-		}
-		return event
-	})
-
+	// Log scrolling
 	c.execLog.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		x, y := c.execLog.GetScrollOffset()
 		switch event.Key() {
 		case tcell.KeyUp:
 			c.execLog.ScrollTo(x, y-1)
+			return nil
 		case tcell.KeyDown:
 			c.execLog.ScrollTo(x, y+1)
+			return nil
 		case tcell.KeyPgUp:
-			c.execLog.ScrollTo(x, y-5)
+			c.execLog.ScrollTo(x, y-10)
+			return nil
 		case tcell.KeyPgDn:
-			c.execLog.ScrollTo(x, y+5)
+			c.execLog.ScrollTo(x, y+10)
+			return nil
+		case tcell.KeyHome:
+			c.execLog.ScrollToBeginning()
+			return nil
+		case tcell.KeyEnd:
+			c.execLog.ScrollToEnd()
+			return nil
 		}
 		return event
 	})
 
-	focusOrder := []tview.Primitive{c.steps, c.stepOutput}
-	currentFocus := 0
+	// Step details scrolling - let tview handle most scrolling, but ensure proper behavior
+	c.stepDetails.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		_, _, _, height := c.stepDetails.GetInnerRect()
+		row, _ := c.stepDetails.GetScrollOffset()
 
-	c.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyTAB {
-			currentFocus = (currentFocus + 1) % len(focusOrder)
-			c.app.SetFocus(focusOrder[currentFocus])
+		switch event.Key() {
+		case tcell.KeyUp:
+			if row > 0 {
+				c.stepDetails.ScrollTo(0, row-1)
+			}
+			return nil
+		case tcell.KeyDown:
+			c.stepDetails.ScrollTo(0, row+1)
+			return nil
+		case tcell.KeyPgUp:
+			newRow := row - height
+			if newRow < 0 {
+				newRow = 0
+			}
+			c.stepDetails.ScrollTo(0, newRow)
+			return nil
+		case tcell.KeyPgDn:
+			c.stepDetails.ScrollTo(0, row+height)
+			return nil
+		case tcell.KeyHome:
+			c.stepDetails.ScrollToBeginning()
+			return nil
+		case tcell.KeyEnd:
+			c.stepDetails.ScrollToEnd()
 			return nil
 		}
+		return event
+	})
+
+	// Tree navigation and operations
+	c.steps.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		node := c.steps.GetCurrentNode()
+		if node == nil {
+			return event
+		}
+
+		switch event.Key() {
+		case tcell.KeyRune:
+			switch event.Rune() {
+			case 'k': // Up
+				return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+			case 'j': // Down
+				return tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+			case 'h': // Left/collapse
+				if node.IsExpanded() {
+					node.SetExpanded(false)
+				} else {
+					// Go to parent
+					c.goToParentNode()
+				}
+				return nil
+			case 'l': // Right/expand
+				if len(node.GetChildren()) > 0 && !node.IsExpanded() {
+					node.SetExpanded(true)
+				}
+				return nil
+			case 'g': // Go to first
+				c.goToFirstNode()
+				return nil
+			case 'G': // Go to last
+				c.goToLastNode()
+				return nil
+			case 'p': // Go to parent
+				c.goToParentNode()
+				return nil
+			case 'e': // Expand all
+				c.expandAll()
+				return nil
+			case 'c': // Collapse all
+				c.collapseAll()
+				return nil
+			case 'E': // Expand subtree
+				c.expandSubtree(node)
+				return nil
+			case 'C': // Collapse subtree
+				c.collapseSubtree(node)
+				return nil
+			case 'n': // Next sibling
+				c.goToNextSibling()
+				return nil
+			case 'N': // Previous sibling
+				c.goToPrevSibling()
+				return nil
+			}
+		case tcell.KeyLeft:
+			if node.IsExpanded() {
+				node.SetExpanded(false)
+			} else {
+				c.goToParentNode()
+			}
+			return nil
+		case tcell.KeyRight:
+			if len(node.GetChildren()) > 0 && !node.IsExpanded() {
+				node.SetExpanded(true)
+			}
+			return nil
+		}
+		return event
+	})
+
+	// Global hotkeys with focus tracking
+	focusOrder := []tview.Primitive{c.steps, c.stepDetails, c.execLog}
+
+	c.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Get currently focused primitive
+		focused := c.app.GetFocus()
+
+		switch event.Key() {
+		case tcell.KeyTAB:
+			// Find current focus index
+			currentIndex := 0
+			for i, prim := range focusOrder {
+				if prim == focused {
+					currentIndex = i
+					break
+				}
+			}
+			// Move to next
+			nextIndex := (currentIndex + 1) % len(focusOrder)
+			c.app.SetFocus(focusOrder[nextIndex])
+			return nil
+		case tcell.KeyRune:
+			switch event.Rune() {
+			case '?':
+				c.toggleHelp()
+				return nil
+			case 's':
+				c.stopExec()
+				return nil
+			case 'd':
+				c.dumpStepsToLog()
+				return nil
+			case 'r':
+				go c.onConfigFileChanged()
+				return nil
+			case '1':
+				c.currentDiffView = "before"
+				c.updateStepDetails(c.steps.GetCurrentNode())
+				return nil
+			case '2':
+				c.currentDiffView = "after"
+				c.updateStepDetails(c.steps.GetCurrentNode())
+				return nil
+			case '3':
+				c.currentDiffView = "diff"
+				c.updateStepDetails(c.steps.GetCurrentNode())
+				return nil
+			case 'm':
+				if hasContextMapData(c.currentEventData) {
+					c.showContextMapForEvent(c.currentEventData)
+				}
+				return nil
+			}
+		case tcell.KeyEscape:
+			// Close context map if open (let it handle its own close)
+			if c.pages.HasPage("contextmap") {
+				c.pages.RemovePage("contextmap")
+				c.app.SetFocus(c.steps)
+				return nil
+			}
+			// Close help if open
+			if c.pages.HasPage("help") {
+				c.pages.HidePage("help")
+			}
+			return nil
+		}
+
+		// Don't intercept navigation keys when step details or log have focus
+		if focused == c.stepDetails || focused == c.execLog {
+			// Let the focused primitive handle navigation keys
+			return event
+		}
+
 		return event
 	})
 
@@ -248,34 +548,30 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		}
 	})
 
-	c.steps.SetChangedFunc(c.updateOnChangeStepNode)
+	c.steps.SetChangedFunc(c.updateStepDetails)
 
-	center := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(c.description, 0, 1, false)
-
+	// Create layout
 	mainFlex := tview.NewFlex().
-		AddItem(c.steps, 50, 1, true).
-		AddItem(center, 0, 2, false).
-		AddItem(c.stepOutput, 0, 3, false)
+		AddItem(c.steps, 0, 1, true).
+		AddItem(c.stepDetails, 0, 2, false)
 
-	execRow := tview.NewFlex().
-		AddItem(c.execLog, 0, 1, false).
-		AddItem(stopButton, 15, 0, false).
-		AddItem(dumpButton, 15, 0, false)
+	c.mainLayout = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(c.execLog, 7, 0, false).
+		AddItem(mainFlex, 0, 1, true).
+		AddItem(c.statusBar, 1, 0, false)
 
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(execRow, 7, 0, false).
-		AddItem(mainFlex, 0, 1, true)
+	// Create pages for help overlay
+	c.pages = tview.NewPages()
+	c.pages.AddPage("main", c.mainLayout, true, true)
 
-	// Switch UI to main layout (no second Run call!)
-	c.app.SetRoot(layout, true).SetFocus(c.steps)
+	c.app.SetRoot(c.pages, true).SetFocus(c.steps)
 
+	// File watcher
 	go func() {
 		for {
 			select {
 			case event := <-c.watcher.Events:
 				if event.Op&fsnotify.Write == fsnotify.Write {
-					// watcher can fire multiple events for the same save
 					debounceMutex.Lock()
 					if debounceTimer != nil {
 						debounceTimer.Stop()
@@ -292,38 +588,764 @@ func (c *ConsoleApp) gotoIDE(path string) {
 	}()
 }
 
-func (c *ConsoleApp) updateOnChangeStepNode(node *tview.TreeNode) {
-	ref := node.GetReference()
-	if ref == nil {
+// Helper to find parent node in tree structure
+func (c *ConsoleApp) findParentNode(targetNode *tview.TreeNode) *tview.TreeNode {
+	var findParent func(*tview.TreeNode, *tview.TreeNode) *tview.TreeNode
+	findParent = func(current *tview.TreeNode, target *tview.TreeNode) *tview.TreeNode {
+		for _, child := range current.GetChildren() {
+			if child == target {
+				return current
+			}
+			if found := findParent(child, target); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	return findParent(c.steps.GetRoot(), targetNode)
+}
+
+// Navigation helpers
+func (c *ConsoleApp) goToParentNode() {
+	node := c.steps.GetCurrentNode()
+	if node == nil {
 		return
 	}
 
-	// You must store the original index or StepProfilerData on the node
-	data, ok := ref.(apigorowler.StepProfilerData)
+	// Find parent by traversing tree structure
+	parentNode := c.findParentNode(node)
+	if parentNode != nil && parentNode != c.steps.GetRoot() {
+		c.steps.SetCurrentNode(parentNode)
+	}
+}
+
+func (c *ConsoleApp) goToNextSibling() {
+	node := c.steps.GetCurrentNode()
+	if node == nil {
+		return
+	}
+
+	// Find parent by traversing tree structure
+	parentNode := c.findParentNode(node)
+	if parentNode == nil {
+		return
+	}
+
+	// Find current node in parent's children
+	children := parentNode.GetChildren()
+	for i, child := range children {
+		if child == node && i < len(children)-1 {
+			// Move to next sibling
+			c.steps.SetCurrentNode(children[i+1])
+			return
+		}
+	}
+}
+
+func (c *ConsoleApp) goToPrevSibling() {
+	node := c.steps.GetCurrentNode()
+	if node == nil {
+		return
+	}
+
+	// Find parent by traversing tree structure
+	parentNode := c.findParentNode(node)
+	if parentNode == nil {
+		return
+	}
+
+	// Find current node in parent's children
+	children := parentNode.GetChildren()
+	for i, child := range children {
+		if child == node && i > 0 {
+			// Move to previous sibling
+			c.steps.SetCurrentNode(children[i-1])
+			return
+		}
+	}
+}
+
+func (c *ConsoleApp) goToFirstNode() {
+	root := c.steps.GetRoot()
+	children := root.GetChildren()
+	if len(children) > 0 {
+		c.steps.SetCurrentNode(children[0])
+	}
+}
+
+func (c *ConsoleApp) goToLastNode() {
+	// Find last visible node by traversing tree
+	var lastNode *tview.TreeNode
+	var traverse func(*tview.TreeNode)
+	traverse = func(node *tview.TreeNode) {
+		lastNode = node
+		if node.IsExpanded() {
+			children := node.GetChildren()
+			for _, child := range children {
+				traverse(child)
+			}
+		}
+	}
+
+	root := c.steps.GetRoot()
+	for _, child := range root.GetChildren() {
+		traverse(child)
+	}
+
+	if lastNode != nil {
+		c.steps.SetCurrentNode(lastNode)
+	}
+}
+
+func (c *ConsoleApp) expandAll() {
+	root := c.steps.GetRoot()
+	var expand func(*tview.TreeNode)
+	expand = func(node *tview.TreeNode) {
+		node.SetExpanded(true)
+		for _, child := range node.GetChildren() {
+			expand(child)
+		}
+	}
+	// Expand root's children, not root itself
+	for _, child := range root.GetChildren() {
+		expand(child)
+	}
+}
+
+func (c *ConsoleApp) collapseAll() {
+	root := c.steps.GetRoot()
+	var collapse func(*tview.TreeNode)
+	collapse = func(node *tview.TreeNode) {
+		node.SetExpanded(false)
+		for _, child := range node.GetChildren() {
+			collapse(child)
+		}
+	}
+	// Collapse root's children, not root itself (which would hide everything)
+	for _, child := range root.GetChildren() {
+		collapse(child)
+	}
+}
+
+func (c *ConsoleApp) expandSubtree(node *tview.TreeNode) {
+	var expand func(*tview.TreeNode)
+	expand = func(n *tview.TreeNode) {
+		n.SetExpanded(true)
+		for _, child := range n.GetChildren() {
+			expand(child)
+		}
+	}
+	expand(node)
+}
+
+func (c *ConsoleApp) collapseSubtree(node *tview.TreeNode) {
+	var collapse func(*tview.TreeNode)
+	collapse = func(n *tview.TreeNode) {
+		n.SetExpanded(false)
+		for _, child := range n.GetChildren() {
+			collapse(child)
+		}
+	}
+	collapse(node)
+}
+
+func (c *ConsoleApp) toggleHelp() {
+	if c.pages.HasPage("help") {
+		c.pages.RemovePage("help")
+	} else {
+		// Create modal with help
+		modal := tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(tview.NewFlex().
+				AddItem(nil, 0, 1, false).
+				AddItem(c.helpPanel, 80, 1, true).
+				AddItem(nil, 0, 1, false), 0, 8, true).
+			AddItem(nil, 0, 1, false)
+
+		c.pages.AddPage("help", modal, true, true)
+	}
+}
+
+func (c *ConsoleApp) updateStatusBar() {
+	// Base status bar text
+	statusText := " [yellow]?[-] Help  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse"
+
+	// Add context map shortcut if current event has context data
+	if hasContextMapData(c.currentEventData) {
+		statusText += "  [black:cyan] m [-:-:-] Context Map"
+	}
+
+	c.statusBar.SetText(statusText)
+}
+
+func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
+	ref := node.GetReference()
+	if ref == nil {
+		c.stepDetails.SetText("")
+		c.currentEventData = silky.StepProfilerData{}
+		c.updateStatusBar()
+		return
+	}
+
+	data, ok := ref.(silky.StepProfilerData)
 	if !ok {
+		c.stepDetails.SetText("")
+		c.currentEventData = silky.StepProfilerData{}
+		c.updateStatusBar()
 		return
 	}
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	c.description.ScrollToBeginning()
-	c.stepOutput.ScrollToBeginning()
+	// Store current event data for diff toggling and status bar
+	c.currentEventData = data
 
-	// Format config
-	conf, _ := json.MarshalIndent(data.Config, "", "  ")
+	// Update status bar to show context map shortcut if available
+	c.updateStatusBar()
 
-	// Build description text
-	descriptionText := ""
-	descriptionText += fmt.Sprintf("[green]Step Name:[-:-:-:-]%s\n", data.Name)
-	descriptionText += fmt.Sprintf("[green]Step Configuration:\n[-:-:-:-]%s\n", escapeBrackets(string(conf)))
-	descriptionText += "\n"
-	for k, v := range data.Extra {
-		descriptionText += fmt.Sprintf("[green]%s:\n[-:-:-:-]%s\n\n", k, v)
+	c.stepDetails.ScrollToBeginning()
+
+	// Build event-specific details
+	var detailsText strings.Builder
+
+	// Header
+	detailsText.WriteString(fmt.Sprintf("[yellow::b]%s[-:-:-]\n", data.Name))
+	detailsText.WriteString(fmt.Sprintf("[#666666]%s[-]\n\n", strings.Repeat("─", 60)))
+
+	// Basic info
+	detailsText.WriteString(fmt.Sprintf("[green::b]Type:[-:-:-] %s\n", getEventTypeName(data.Type)))
+	detailsText.WriteString(fmt.Sprintf("[green::b]Time:[-:-:-] %s", data.Timestamp.Format("15:04:05.000")))
+	if data.Duration > 0 {
+		detailsText.WriteString(fmt.Sprintf("  [yellow::b]Duration:[-:-:-] %dms", data.Duration))
+	}
+	detailsText.WriteString("\n")
+
+	if data.WorkerID != 0 || data.WorkerPool != "" {
+		detailsText.WriteString(fmt.Sprintf("[green::b]Worker:[-:-:-] %s (Thread %d)\n", data.WorkerPool, data.WorkerID))
+	}
+	detailsText.WriteString("\n")
+
+	// Event-specific details
+	switch data.Type {
+	case silky.EVENT_ROOT_START:
+		c.formatRootStart(&detailsText, data)
+	case silky.EVENT_REQUEST_STEP_START, silky.EVENT_FOREACH_STEP_START, silky.EVENT_FORVALUES_STEP_START:
+		c.formatStepStart(&detailsText, data)
+	case silky.EVENT_CONTEXT_SELECTION:
+		c.formatContextSelection(&detailsText, data)
+	case silky.EVENT_REQUEST_PAGE_START:
+		c.formatRequestPage(&detailsText, data)
+	case silky.EVENT_PAGINATION_EVAL:
+		c.formatPaginationEval(&detailsText, data)
+	case silky.EVENT_URL_COMPOSITION:
+		c.formatUrlComposition(&detailsText, data)
+	case silky.EVENT_REQUEST_DETAILS:
+		c.formatRequestDetails(&detailsText, data)
+	case silky.EVENT_REQUEST_RESPONSE:
+		c.formatRequestResponse(&detailsText, data)
+	case silky.EVENT_RESPONSE_TRANSFORM:
+		c.formatResponseTransform(&detailsText, data)
+	case silky.EVENT_CONTEXT_MERGE:
+		c.formatContextMerge(&detailsText, data)
+	case silky.EVENT_PARALLELISM_SETUP:
+		c.formatParallelismSetup(&detailsText, data)
+	case silky.EVENT_ITEM_SELECTION:
+		c.formatItemSelection(&detailsText, data)
+	case silky.EVENT_AUTH_START, silky.EVENT_AUTH_END:
+		c.formatAuthStartEnd(&detailsText, data)
+	case silky.EVENT_AUTH_CACHED:
+		c.formatAuthCached(&detailsText, data)
+	case silky.EVENT_AUTH_LOGIN_START, silky.EVENT_AUTH_LOGIN_END:
+		c.formatAuthLogin(&detailsText, data)
+	case silky.EVENT_AUTH_TOKEN_EXTRACT:
+		c.formatAuthTokenExtract(&detailsText, data)
+	case silky.EVENT_AUTH_TOKEN_INJECT:
+		c.formatAuthTokenInject(&detailsText, data)
+	case silky.EVENT_RESULT, silky.EVENT_STREAM_RESULT:
+		c.formatResult(&detailsText, data)
+	case silky.EVENT_ERROR:
+		c.formatError(&detailsText, data)
+	default:
+		// Generic data display
+		if len(data.Data) > 0 {
+			dataJson, _ := json.MarshalIndent(data.Data, "", "  ")
+			detailsText.WriteString(fmt.Sprintf("[green::b]Data:[-:-:-]\n%s\n", escapeBrackets(string(dataJson))))
+		}
 	}
 
-	c.description.SetText(descriptionText)
-	c.stepOutput.SetText(data.DataString)
+	c.stepDetails.SetText(detailsText.String())
+}
+
+// Event-specific formatters
+func (c *ConsoleApp) formatRootStart(sb *strings.Builder, data silky.StepProfilerData) {
+	sb.WriteString("[cyan::b]Initial Context[-:-:-]\n")
+	if ctx, ok := data.Data["contextMap"]; ok {
+		jsonStr, _ := json.MarshalIndent(ctx, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatStepStart(sb *strings.Builder, data silky.StepProfilerData) {
+	sb.WriteString("[cyan::b]Step Configuration[-:-:-]\n")
+	if cfg, ok := data.Data["stepConfig"]; ok {
+		jsonStr, _ := json.MarshalIndent(cfg, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatContextSelection(sb *strings.Builder, data silky.StepProfilerData) {
+	if path, ok := data.Data["contextPath"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Context Path:[-:-:-] %s\n\n", path))
+	}
+	if ctx, ok := data.Data["currentContextData"]; ok {
+		sb.WriteString("[cyan::b]Current Context Data[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(ctx, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n\n", escapeBrackets(string(jsonStr))))
+	}
+
+	// Show hint for full context map modal
+	if _, ok := data.Data["fullContextMap"]; ok {
+		sb.WriteString("[#888888]Press [yellow::b]m[-:-:-][#888888] to open full context map viewer[-]\n")
+	}
+}
+
+func (c *ConsoleApp) formatRequestPage(sb *strings.Builder, data silky.StepProfilerData) {
+	if pageNum, ok := data.Data["pageNumber"]; ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Page Number:[-:-:-] %v\n", pageNum))
+	}
+}
+
+func (c *ConsoleApp) formatPaginationEval(sb *strings.Builder, data silky.StepProfilerData) {
+	sb.WriteString("[cyan::b]Pagination State[-:-:-]\n\n")
+
+	if prevState, ok := data.Data["previousState"].(map[string]any); ok {
+		sb.WriteString("[yellow]Before:[-]\n")
+		jsonStr, _ := json.MarshalIndent(prevState, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n\n", escapeBrackets(string(jsonStr))))
+	}
+
+	if afterState, ok := data.Data["afterState"].(map[string]any); ok {
+		sb.WriteString("[green]After:[-]\n")
+		jsonStr, _ := json.MarshalIndent(afterState, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatUrlComposition(sb *strings.Builder, data silky.StepProfilerData) {
+	if template, ok := data.Data["urlTemplate"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]URL Template:[-:-:-]\n%s\n\n", template))
+	}
+	if resultUrl, ok := data.Data["resultUrl"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Result URL:[-:-:-]\n%s\n\n", resultUrl))
+	}
+
+	// Show hint for template context modal
+	if _, ok := data.Data["goTemplateContext"]; ok {
+		sb.WriteString("[#888888]Press [yellow::b]m[-:-:-][#888888] to open template context viewer[-]\n")
+	}
+}
+
+func (c *ConsoleApp) formatRequestDetails(sb *strings.Builder, data silky.StepProfilerData) {
+	if curl, ok := data.Data["curl"].(string); ok {
+		sb.WriteString("[cyan::b]cURL Command:[-:-:-]\n")
+		sb.WriteString(fmt.Sprintf("[#888888]%s[-]\n\n", escapeBrackets(curl)))
+	}
+
+	if method, ok := data.Data["method"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Method:[-:-:-] %s\n", method))
+	}
+	if url, ok := data.Data["url"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]URL:[-:-:-] %s\n\n", url))
+	}
+
+	if headers, ok := data.Data["headers"].(map[string]any); ok && len(headers) > 0 {
+		sb.WriteString("[cyan::b]Headers:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(headers, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatRequestResponse(sb *strings.Builder, data silky.StepProfilerData) {
+	if status, ok := data.Data["statusCode"]; ok {
+		var statusCode int
+		switch v := status.(type) {
+		case int:
+			statusCode = v
+		case float64:
+			statusCode = int(v)
+		case int64:
+			statusCode = int(v)
+		default:
+			statusCode = 0
+		}
+
+		color := "green"
+		if statusCode >= 400 {
+			color = "red"
+		} else if statusCode >= 300 {
+			color = "yellow"
+		}
+		sb.WriteString(fmt.Sprintf("[%s::b]Status Code:[-:-:-] %d\n\n", color, statusCode))
+	}
+
+	if body, ok := data.Data["body"]; ok {
+		sb.WriteString("[cyan::b]Response Body:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(body, "", "  ")
+		// Truncate very large responses
+		bodyStr := string(jsonStr)
+		if len(bodyStr) > 5000 {
+			bodyStr = bodyStr[:5000] + "\n\n[yellow]... (truncated, too large to display)[-]"
+		}
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(bodyStr)))
+	}
+}
+
+func (c *ConsoleApp) formatResponseTransform(sb *strings.Builder, data silky.StepProfilerData) {
+	if rule, ok := data.Data["transformRule"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Transform Rule:[-:-:-]\n[yellow]%s[-]\n\n", rule))
+	}
+
+	before, hasBefore := data.Data["beforeResponse"]
+	after, hasAfter := data.Data["afterResponse"]
+
+	if !hasBefore || !hasAfter {
+		return
+	}
+
+	// Show view toggle buttons
+	view := c.currentDiffView
+	if view == "" {
+		view = "diff"
+		c.currentDiffView = "diff"
+	}
+
+	btn1 := "[ 1:Before ]"
+	btn2 := "[ 2:After ]"
+	btn3 := "[ 3:Diff ]"
+
+	if view == "before" {
+		btn1 = "[black:green][ 1:Before ][-:-:-]"
+	} else if view == "after" {
+		btn2 = "[black:green][ 2:After ][-:-:-]"
+	} else {
+		btn3 = "[black:green][ 3:Diff ][-:-:-]"
+	}
+
+	sb.WriteString(fmt.Sprintf("%s %s %s\n\n", btn1, btn2, btn3))
+
+	// Display based on current view
+	switch view {
+	case "before":
+		sb.WriteString("[cyan::b]Before Transform:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(before, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+
+	case "after":
+		sb.WriteString("[cyan::b]After Transform:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(after, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+
+	case "diff":
+		sb.WriteString("[cyan::b]Diff (word-based):[-:-:-]\n")
+		beforeStr, _ := json.MarshalIndent(before, "", "  ")
+		afterStr, _ := json.MarshalIndent(after, "", "  ")
+		diff := getColoredDiff(string(beforeStr), string(afterStr))
+		sb.WriteString(diff)
+		sb.WriteString("\n")
+	}
+}
+
+func (c *ConsoleApp) formatContextMerge(sb *strings.Builder, data silky.StepProfilerData) {
+	if rule, ok := data.Data["mergeRule"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Merge Rule:[-:-:-]\n[yellow]%s[-]\n\n", rule))
+	}
+
+	if currentKey, ok := data.Data["currentContextKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Current Context:[-:-:-] %s\n", currentKey))
+	}
+	if targetKey, ok := data.Data["targetContextKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Target Context:[-:-:-] %s\n\n", targetKey))
+	}
+
+	before, hasBefore := data.Data["targetContextBefore"]
+	after, hasAfter := data.Data["targetContextAfter"]
+
+	if !hasBefore || !hasAfter {
+		return
+	}
+
+	// Show view toggle buttons
+	view := c.currentDiffView
+	if view == "" {
+		view = "diff"
+		c.currentDiffView = "diff"
+	}
+
+	btn1 := "[ 1:Before ]"
+	btn2 := "[ 2:After ]"
+	btn3 := "[ 3:Diff ]"
+
+	if view == "before" {
+		btn1 = "[black:green][ 1:Before ][-:-:-]"
+	} else if view == "after" {
+		btn2 = "[black:green][ 2:After ][-:-:-]"
+	} else {
+		btn3 = "[black:green][ 3:Diff ][-:-:-]"
+	}
+
+	sb.WriteString(fmt.Sprintf("%s %s %s\n\n", btn1, btn2, btn3))
+
+	// Display based on current view
+	switch view {
+	case "before":
+		sb.WriteString("[cyan::b]Target Before Merge:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(before, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+
+	case "after":
+		sb.WriteString("[cyan::b]Target After Merge:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(after, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+
+	case "diff":
+		sb.WriteString("[cyan::b]Diff (word-based):[-:-:-]\n")
+		beforeStr, _ := json.MarshalIndent(before, "", "  ")
+		afterStr, _ := json.MarshalIndent(after, "", "  ")
+		diff := getColoredDiff(string(beforeStr), string(afterStr))
+		sb.WriteString(diff)
+		sb.WriteString("\n")
+	}
+
+	// Show hint for full context map modal
+	if _, ok := data.Data["fullContextMap"]; ok {
+		sb.WriteString("\n[#888888]Press [yellow::b]m[-:-:-][#888888] to open full context map viewer[-]\n")
+	}
+}
+
+func (c *ConsoleApp) formatParallelismSetup(sb *strings.Builder, data silky.StepProfilerData) {
+	if workers, ok := data.Data["maxConcurrency"]; ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Max Concurrency:[-:-:-] %v\n", workers))
+	}
+	if rateLimit, ok := data.Data["rateLimit"]; ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Rate Limit:[-:-:-] %v req/s\n", rateLimit))
+	}
+	if burst, ok := data.Data["burst"]; ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Burst:[-:-:-] %v\n", burst))
+	}
+	if poolId, ok := data.Data["workerPoolId"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Worker Pool ID:[-:-:-] %s\n", poolId))
+	}
+}
+
+func (c *ConsoleApp) formatItemSelection(sb *strings.Builder, data silky.StepProfilerData) {
+	if idx, ok := data.Data["iterationIndex"]; ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Iteration Index:[-:-:-] %v\n\n", idx))
+	}
+
+	if item, ok := data.Data["itemValue"]; ok {
+		sb.WriteString("[cyan::b]Item Value:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(item, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatResult(sb *strings.Builder, data silky.StepProfilerData) {
+	var result interface{}
+	if r, ok := data.Data["result"]; ok {
+		result = r
+	} else if e, ok := data.Data["entity"]; ok {
+		result = e
+		if idx, ok := data.Data["index"]; ok {
+			sb.WriteString(fmt.Sprintf("[cyan::b]Stream Index:[-:-:-] %v\n\n", idx))
+		}
+	}
+
+	if result != nil {
+		sb.WriteString("[cyan::b]Result:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(result, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthStartEnd(sb *strings.Builder, data silky.StepProfilerData) {
+	if authType, ok := data.Data["authType"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Authentication Type:[-:-:-] %s\n\n", authType))
+	}
+
+	if err, ok := data.Data["error"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[red::b]Error:[-:-:-]\n%s\n\n", escapeBrackets(err)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("[cyan::b]Auth Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthCached(sb *strings.Builder, data silky.StepProfilerData) {
+	sb.WriteString("[green::b]Using cached credentials[-:-:-]\n\n")
+
+	if age, ok := data.Data["age"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cache Age:[-:-:-] %s\n", age))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+}
+
+func (c *ConsoleApp) formatAuthLogin(sb *strings.Builder, data silky.StepProfilerData) {
+	if url, ok := data.Data["url"].(string); ok {
+		if method, ok := data.Data["method"].(string); ok {
+			sb.WriteString(fmt.Sprintf("[cyan::b]Login URL:[-:-:-] %s %s\n\n", method, escapeBrackets(url)))
+		} else {
+			sb.WriteString(fmt.Sprintf("[cyan::b]Login URL:[-:-:-] %s\n\n", escapeBrackets(url)))
+		}
+	}
+
+	if status, ok := data.Data["statusCode"]; ok {
+		var statusCode int
+		switch v := status.(type) {
+		case int:
+			statusCode = v
+		case float64:
+			statusCode = int(v)
+		case int64:
+			statusCode = int(v)
+		default:
+			statusCode = 0
+		}
+
+		color := "green"
+		if statusCode >= 400 {
+			color = "red"
+		} else if statusCode >= 300 {
+			color = "yellow"
+		}
+		sb.WriteString(fmt.Sprintf("[%s::b]Status Code:[-:-:-] %d\n\n", color, statusCode))
+	}
+
+	if err, ok := data.Data["error"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[red::b]Error:[-:-:-]\n%s\n\n", escapeBrackets(err)))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("\n[cyan::b]Full Login Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthTokenExtract(sb *strings.Builder, data silky.StepProfilerData) {
+	if extractFrom, ok := data.Data["extractFrom"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Extract From:[-:-:-] %s\n", extractFrom))
+	} else if selector, ok := data.Data["extractSelector"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Extract Selector:[-:-:-] %s\n", selector))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+
+	if headerName, ok := data.Data["headerName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Header Name:[-:-:-] %s\n", escapeBrackets(headerName)))
+	}
+
+	if jqSelector, ok := data.Data["jqSelector"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]JQ Selector:[-:-:-] %s\n", escapeBrackets(jqSelector)))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Extracted Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+}
+
+func (c *ConsoleApp) formatAuthTokenInject(sb *strings.Builder, data silky.StepProfilerData) {
+	if location, ok := data.Data["location"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Injection Location:[-:-:-] %s\n", location))
+	}
+
+	if format, ok := data.Data["format"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Format:[-:-:-] %s\n", format))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if headerKey, ok := data.Data["headerKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Header Key:[-:-:-] %s\n", escapeBrackets(headerKey)))
+	}
+
+	if queryKey, ok := data.Data["queryKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Query Parameter Key:[-:-:-] %s\n", escapeBrackets(queryKey)))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+}
+
+func (c *ConsoleApp) formatError(sb *strings.Builder, data silky.StepProfilerData) {
+	// Try multiple keys for error message
+	var errorMsg string
+	if err, ok := data.Data["error"].(string); ok {
+		errorMsg = err
+	} else if msg, ok := data.Data["message"].(string); ok {
+		errorMsg = msg
+	} else {
+		errorMsg = "Unknown error"
+	}
+
+	sb.WriteString(fmt.Sprintf("[red::b]Error Message:[-:-:-]\n%s\n\n", escapeBrackets(errorMsg)))
+
+	if errorType, ok := data.Data["errorType"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Error Type:[-:-:-] %s\n", errorType))
+	} else if errType, ok := data.Data["type"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Error Type:[-:-:-] %s\n", errType))
+	}
+
+	if stepName, ok := data.Data["stepName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Step:[-:-:-] %s\n", escapeBrackets(stepName)))
+	}
+
+	if details, ok := data.Data["details"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Details:[-:-:-]\n%s\n", escapeBrackets(details)))
+	}
+
+	if stackTrace, ok := data.Data["stackTrace"].(string); ok {
+		sb.WriteString(fmt.Sprintf("\n[yellow::b]Stack Trace:[-:-:-]\n%s\n", escapeBrackets(stackTrace)))
+	} else if stack, ok := data.Data["stack"].(string); ok {
+		sb.WriteString(fmt.Sprintf("\n[yellow::b]Stack Trace:[-:-:-]\n%s\n", escapeBrackets(stack)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("\n[cyan::b]Full Error Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
 }
 
 func (c *ConsoleApp) appendLog(log string) {
@@ -341,7 +1363,8 @@ func (c *ConsoleApp) appendLog(log string) {
 }
 
 func (c *ConsoleApp) setupCrawlJob() {
-	c.profilerData = make([]apigorowler.StepProfilerData, 0)
+	c.profilerData = make([]silky.StepProfilerData, 0)
+	c.nodeMap = make(map[string]*tview.TreeNode)
 	if c.stopFn != nil {
 		c.stopFn()
 	}
@@ -354,58 +1377,84 @@ func (c *ConsoleApp) setupCrawlJob() {
 		}
 		defer recoverAndLog(logger)
 
-		// accuumulator for stream data
+		// accumulator for stream data
 		streamedData := make([]interface{}, 0)
 
-		craw, _, _ := apigorowler.NewApiCrawler(c.configFilePath)
+		craw, _, _ := silky.NewApiCrawler(c.configFilePath)
 		craw.SetLogger(logger)
 		profiler := craw.EnableProfiler()
 		defer close(profiler)
 
+		// Track START events to update with duration later
+		startEvents := make(map[string]int) // map event ID to profilerData index
+
 		go func() {
-			nodeStack := []*tview.TreeNode{c.steps.GetRoot()} // root as initial parent
+			root := c.steps.GetRoot()
 
 			for d := range profiler {
-				if d.Type == apigorowler.STEP_PROFILER_TYPE_END_SILENT {
-					// End nesting — pop the current parent (but never pop root)
-					if len(nodeStack) > 1 {
-						nodeStack = nodeStack[:len(nodeStack)-1]
-					}
-					continue
-				}
-				// Marshal Data into string
-				dataString, _ := json.MarshalIndent(d.Data, "", "  ")
-				if d.DataBefore != nil {
-					dataStringBefore, _ := json.MarshalIndent(d.DataBefore, "", "  ")
-					d.Extra["Step Diff with prev"] = (getColoredDiff(string(dataStringBefore), string(dataString)))
-				}
-				d.DataString = escapeBrackets(string(dataString))
-
 				c.profilerData = append(c.profilerData, d)
+				dataIndex := len(c.profilerData) - 1
 
-				// Create the tree node with reference to the data
-				node := tview.NewTreeNode(d.Name).
+				// Create node label with duration for END events
+				label := d.Name
+				if d.Duration > 0 {
+					label = fmt.Sprintf("%s (%dms)", d.Name, d.Duration)
+				}
+
+				// Determine if this is a container event
+				isContainer := isContainerEvent(d.Type)
+
+				// Create the tree node
+				node := tview.NewTreeNode(label).
 					SetReference(d).
 					SetSelectable(true)
 
-				// Append to current parent node
-				currentParent := nodeStack[len(nodeStack)-1]
-				currentParent.AddChild(node)
-				c.steps.SetCurrentNode(node)
-				c.updateOnChangeStepNode(node)
+				// Store in nodeMap
+				c.nodeMap[d.ID] = node
 
-				switch d.Type {
-				case apigorowler.STEP_PROFILER_TYPE_START:
-					// Start a nested block — push this node as new parent
-					nodeStack = append(nodeStack, node)
-				case apigorowler.STEP_PROFILER_TYPE_END:
-					// End nesting — pop the current parent (but never pop root)
-					if len(nodeStack) > 1 {
-						nodeStack = nodeStack[:len(nodeStack)-1]
-					}
-				case apigorowler.STEP_PROFILER_TYPE_NONE:
-					// Do nothing, stay at same level
+				// Store START events to update them with duration later
+				if isStartEvent(d.Type) {
+					startEvents[d.ID] = dataIndex
 				}
+
+				// Update START event with duration if this is an END event
+				if isEndEvent(d.Type) {
+					// Find matching START event (same ID)
+					if startIdx, ok := startEvents[d.ID]; ok {
+						startData := c.profilerData[startIdx]
+						startData.Duration = d.Duration
+						c.profilerData[startIdx] = startData
+
+						// Update node label with duration
+						if startNode, exists := c.nodeMap[d.ID]; exists {
+							startNode.SetText(fmt.Sprintf("%s (%dms)", startData.Name, d.Duration))
+						}
+						delete(startEvents, d.ID)
+					}
+					continue // Don't add END events as separate nodes
+				}
+
+				// Find parent node
+				var parentNode *tview.TreeNode
+				if d.ParentID == "" {
+					parentNode = root
+				} else {
+					parentNode = c.nodeMap[d.ParentID]
+					if parentNode == nil {
+						// Parent not found, add to root
+						parentNode = root
+					}
+				}
+
+				// Add node to parent
+				c.app.QueueUpdateDraw(func() {
+					parentNode.AddChild(node)
+					if isContainer {
+						parentNode.SetExpanded(true)
+					}
+					c.steps.SetCurrentNode(node)
+					c.updateStepDetails(node)
+				})
 			}
 		}()
 
@@ -428,55 +1477,8 @@ func (c *ConsoleApp) setupCrawlJob() {
 		if err != nil {
 			c.appendLog("[red]" + escapeBrackets(err.Error()))
 		} else {
-			if !craw.Config.Stream {
-				res := craw.GetData()
-				c.app.QueueUpdateDraw(func() {
-					output, _ := json.MarshalIndent(res, "", "   ")
-					c.stepOutput.SetText(escapeBrackets(string(output)))
-				})
-			} else {
+			if craw.Config.Stream {
 				close(craw.GetDataStream())
-				// Get the last profiler entry
-				lastIndex := len(c.profilerData) - 1
-				lastData := c.profilerData[lastIndex]
-
-				// Update its data string
-				lastData.Data = streamedData
-
-				outputText := ""
-				for _, d := range streamedData {
-					output, _ := json.MarshalIndent(d, "", "   ")
-					if len(outputText) != 0 {
-						outputText += "\n---\n"
-					}
-					outputText += string(output)
-				}
-				lastData.DataString = escapeBrackets(outputText)
-				c.profilerData[lastIndex] = lastData // reassign (if you're using value semantics)
-
-				// -------- Update the Tree Node --------
-
-				// Assuming you stored node references or can traverse to the last added node:
-				var updateLastNode func(node *tview.TreeNode) bool
-				updateLastNode = func(node *tview.TreeNode) bool {
-					children := node.GetChildren()
-					if len(children) == 0 {
-						return false
-					}
-					lastChild := children[len(children)-1]
-					if len(lastChild.GetChildren()) == 0 {
-						// It's a leaf node, update it
-						lastChild.SetReference(lastData)
-						c.steps.SetCurrentNode(lastChild)
-						c.updateOnChangeStepNode(lastChild)
-						return true
-					}
-					return updateLastNode(lastChild)
-				}
-
-				// Start recursive search from the root
-				updateLastNode(c.steps.GetRoot())
-
 			}
 			c.appendLog("[green]Crawler run completed successfully")
 		}
@@ -484,9 +1486,9 @@ func (c *ConsoleApp) setupCrawlJob() {
 }
 
 func (c *ConsoleApp) onConfigFileChanged() {
-	c.description.SetText("")
-	c.stepOutput.SetText("")
+	c.stepDetails.SetText("")
 	c.steps.GetRoot().ClearChildren()
+	c.nodeMap = make(map[string]*tview.TreeNode)
 
 	data, err := os.ReadFile(c.configFilePath)
 	if err != nil {
@@ -497,14 +1499,14 @@ func (c *ConsoleApp) onConfigFileChanged() {
 		return
 	}
 
-	var cfg apigorowler.Config
+	var cfg silky.Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
 		c.appendLog("[red]" + escapeBrackets(err.Error()))
 		return
 	}
 
-	errors := apigorowler.ValidateConfig(cfg)
+	errors := silky.ValidateConfig(cfg)
 	if len(errors) != 0 {
 		text := "[red]"
 		for _, r := range errors {
@@ -558,7 +1560,7 @@ func (c *ConsoleApp) dumpStepsToLog() {
 	traverse = func(node *tview.TreeNode, depth int) {
 		// Only process nodes with data references
 		if ref := node.GetReference(); ref != nil {
-			if step, ok := ref.(apigorowler.StepProfilerData); ok {
+			if step, ok := ref.(silky.StepProfilerData); ok {
 				// Apply indentation
 				prefix := strings.Repeat("__", depth)
 				prefixedName := prefix + step.Name

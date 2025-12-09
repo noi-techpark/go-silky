@@ -1,0 +1,8 @@
+{
+  "config": {
+    "region": "eu",
+    "env": "staging",
+    "maxConnections": 10,
+    "timeout": 60
+  }
+}

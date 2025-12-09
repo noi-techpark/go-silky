@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "id": 123,
+      "username": "testuser",
+      "email": "test@example.com",
+      "created": true
+    }
+  ]
+}

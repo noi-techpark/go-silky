@@ -1,0 +1,21 @@
+# Test: Bearer Token Authentication
+# This test verifies Bearer token auth where a pre-obtained token is used
+# The token is added as "Authorization: Bearer <token>" header to all requests
+
+rootContext: {}
+
+# Global auth using Bearer token
+auth:
+  type: bearer
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test
+
+steps:
+  - type: request
+    name: "Get API resources"
+    request:
+      url: https://api.example.com/v2/resources
+      method: GET
+      headers:
+        Accept: application/json
+    # Extract nested data structure
+    resultTransformer: .data.items

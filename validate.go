@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package apigorowler
+package silky
 
 import (
 	"fmt"
@@ -66,15 +66,34 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 	var errs []ValidationError
 
 	t := strings.ToLower(auth.Type)
-	if t != "basic" && t != "bearer" && t != "oauth" {
-		errs = append(errs, ValidationError{fmt.Sprintf("auth.type must be one of [basic, bearer, oauth], got '%s'", auth.Type), location + ".type"})
+	validTypes := []string{"basic", "bearer", "oauth", "cookie", "jwt", "custom"}
+	isValidType := false
+	for _, vt := range validTypes {
+		if t == vt {
+			isValidType = true
+			break
+		}
+	}
+	if !isValidType {
+		errs = append(errs, ValidationError{fmt.Sprintf("auth.type must be one of [basic, bearer, oauth, cookie, jwt, custom], got '%s'", auth.Type), location + ".type"})
+		return errs
 	}
 
-	if t == "bearer" && auth.Token == "" {
-		errs = append(errs, ValidationError{"auth.token is required when type is bearer", location + ".token"})
-	}
+	switch t {
+	case "basic":
+		if auth.Username == "" {
+			errs = append(errs, ValidationError{"auth.username is required when type is basic", location + ".username"})
+		}
+		if auth.Password == "" {
+			errs = append(errs, ValidationError{"auth.password is required when type is basic", location + ".password"})
+		}
 
-	if t == "oauth" {
+	case "bearer":
+		if auth.Token == "" {
+			errs = append(errs, ValidationError{"auth.token is required when type is bearer", location + ".token"})
+		}
+
+	case "oauth":
 		if auth.Method == "" {
 			errs = append(errs, ValidationError{"auth.method is required when type is oauth", location + ".method"})
 		} else if auth.Method != "password" && auth.Method != "client_credentials" {
@@ -101,14 +120,51 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 				errs = append(errs, ValidationError{"auth.password is required when method is password", location + ".password"})
 			}
 		}
-	}
 
-	if t == "basic" {
-		if auth.Username == "" {
-			errs = append(errs, ValidationError{"auth.username is required when type is basic", location + ".username"})
+	case "cookie":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is cookie", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
 		}
-		if auth.Password == "" {
-			errs = append(errs, ValidationError{"auth.password is required when type is basic", location + ".password"})
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is cookie", location + ".extractSelector"})
+		}
+
+	case "jwt":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is jwt", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+		}
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is jwt", location + ".extractSelector"})
+		}
+		if auth.ExtractFrom != "" && auth.ExtractFrom != "header" && auth.ExtractFrom != "body" {
+			errs = append(errs, ValidationError{"auth.extractFrom must be 'header' or 'body' when specified", location + ".extractFrom"})
+		}
+
+	case "custom":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is custom", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+		}
+		if auth.ExtractFrom == "" {
+			errs = append(errs, ValidationError{"auth.extractFrom is required when type is custom", location + ".extractFrom"})
+		} else if auth.ExtractFrom != "cookie" && auth.ExtractFrom != "header" && auth.ExtractFrom != "body" {
+			errs = append(errs, ValidationError{"auth.extractFrom must be 'cookie', 'header', or 'body'", location + ".extractFrom"})
+		}
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is custom", location + ".extractSelector"})
+		}
+		if auth.InjectInto == "" {
+			errs = append(errs, ValidationError{"auth.injectInto is required when type is custom", location + ".injectInto"})
+		} else if auth.InjectInto != "cookie" && auth.InjectInto != "header" && auth.InjectInto != "bearer" && auth.InjectInto != "query" && auth.InjectInto != "body" {
+			errs = append(errs, ValidationError{"auth.injectInto must be one of [cookie, header, bearer, query, body]", location + ".injectInto"})
+		}
+		if auth.InjectInto != "bearer" && auth.InjectKey == "" {
+			errs = append(errs, ValidationError{"auth.injectKey is required when injectInto is not 'bearer'", location + ".injectKey"})
 		}
 	}
 
@@ -119,18 +175,42 @@ func validateStep(step Step, location string) []ValidationError {
 	var errs []ValidationError
 
 	t := strings.ToLower(step.Type)
-	if t != "foreach" && t != "request" {
-		errs = append(errs, ValidationError{fmt.Sprintf("step.type must be 'foreach' or 'request', got '%s'", step.Type), location + ".type"})
+	if t != "foreach" && t != "request" && t != "forvalues" {
+		errs = append(errs, ValidationError{fmt.Sprintf("step.type must be 'foreach', 'forValues', or 'request', got '%s'", step.Type), location + ".type"})
 		return errs
 	}
 
-	if t == "foreach" {
-		// foreach rules
-		if step.Path == "" {
-			errs = append(errs, ValidationError{"foreach step requires path", location + ".path"})
+	if t == "forvalues" {
+		// forValues rules - only accepts literal values, no path
+		if len(step.Values) == 0 {
+			errs = append(errs, ValidationError{"forValues step requires values", location + ".values"})
+		}
+		if step.Path != "" {
+			errs = append(errs, ValidationError{"forValues step does not accept path (use forEach for path-based iteration)", location + ".path"})
 		}
 		if step.As == "" {
-			errs = append(errs, ValidationError{"foreach step requires as", location + ".as"})
+			errs = append(errs, ValidationError{"forValues step requires as", location + ".as"})
+		}
+		// forValues does not support merge options - it's an overlay, not a transform
+		if step.MergeOn != "" || step.MergeWithParentOn != "" || step.MergeWithContext != nil || step.NoopMerge {
+			errs = append(errs, ValidationError{"forValues step does not support merge options (nested steps handle merging)", location})
+		}
+		// forValues does not support parallelism (yet)
+		if step.Parallelism != nil {
+			errs = append(errs, ValidationError{"forValues step does not support parallelism", location + ".parallelism"})
+		}
+		// Validate nested steps
+		for i, nested := range step.Steps {
+			errs = append(errs, validateStep(nested, fmt.Sprintf("%s.steps[%d]", location, i))...)
+		}
+		return errs
+	} else if t == "foreach" {
+		// foreach rules - requires path for data extraction
+		if step.Path == "" {
+			errs = append(errs, ValidationError{"forEach step requires path", location + ".path"})
+		}
+		if step.As == "" {
+			errs = append(errs, ValidationError{"forEach step requires as", location + ".as"})
 		}
 		// if len(step.Steps) == 0 {
 		// 	errs = append(errs, ValidationError{"foreach step requires nested steps", location + ".steps"})
@@ -158,6 +238,11 @@ func validateStep(step Step, location string) []ValidationError {
 		}
 		errs = append(errs, validateRequest(*step.Request, location+".request")...)
 
+		// request steps do not support 'as' - use forValues for context overlay
+		if step.As != "" {
+			errs = append(errs, ValidationError{"request step does not support 'as' (use forValues for context overlay)", location + ".as"})
+		}
+
 		// Validate nested steps if any
 		for i, nested := range step.Steps {
 			errs = append(errs, validateStep(nested, fmt.Sprintf("%s.steps[%d]", location, i))...)
@@ -170,6 +255,47 @@ func validateStep(step Step, location string) []ValidationError {
 	}
 	if step.MergeWithParentOn != "" {
 		// could validate jq here with gojq.Parse(step.MergeWithParentOn)
+	}
+
+	// Validate that merge options are mutually exclusive
+	mergeOptionCount := 0
+	if step.MergeOn != "" {
+		mergeOptionCount++
+	}
+	if step.MergeWithParentOn != "" {
+		mergeOptionCount++
+	}
+	if step.MergeWithContext != nil {
+		mergeOptionCount++
+	}
+	if step.NoopMerge {
+		mergeOptionCount++
+	}
+	if mergeOptionCount > 1 {
+		errs = append(errs, ValidationError{
+			"only one merge option can be specified: mergeOn, mergeWithParentOn, mergeWithContext, or noopMerge",
+			location,
+		})
+	}
+
+	// Validate noopMerge doesn't conflict with other merge options (redundant with above but keeping for clarity)
+	if step.NoopMerge {
+		conflictCount := 0
+		if step.MergeOn != "" {
+			conflictCount++
+		}
+		if step.MergeWithParentOn != "" {
+			conflictCount++
+		}
+		if step.MergeWithContext != nil {
+			conflictCount++
+		}
+		if conflictCount > 0 {
+			errs = append(errs, ValidationError{
+				"noopMerge cannot be used with mergeOn, mergeWithParentOn, or mergeWithContext",
+				location + ".noopMerge",
+			})
+		}
 	}
 
 	return errs
@@ -187,6 +313,26 @@ func validateRequest(req RequestConfig, location string) []ValidationError {
 		m := strings.ToUpper(req.Method)
 		if m != "GET" && m != "POST" {
 			errs = append(errs, ValidationError{"request.method must be GET or POST", location + ".method"})
+		}
+
+		// POST requests with body must specify Content-Type in headers
+		if m == "POST" && len(req.Body) > 0 {
+			hasContentType := false
+			if req.Headers != nil {
+				// Check if Content-Type is set in headers (case-insensitive)
+				for key := range req.Headers {
+					if strings.ToLower(key) == "content-type" {
+						hasContentType = true
+						break
+					}
+				}
+			}
+			if !hasContentType {
+				errs = append(errs, ValidationError{
+					"POST requests with body must specify Content-Type in headers",
+					location + ".headers",
+				})
+			}
 		}
 	}
 

@@ -1,5 +1,9 @@
+# Test: Pagination with integer increment
+# Demonstrates: parameterized pagination, offset increments, stop conditions based on parameters
+
+# Start with empty array - will collect paginated results
 rootContext: []
-  
+
 steps:
   - type: request
     name: Fetch Facilities
@@ -10,18 +14,27 @@ steps:
         Accept: application/json
       body:
 
+      # Pagination configuration: increments offset parameter
       pagination:
         params:
+          # Define pagination parameter
           - name: offset
+            # Parameter will be added to query string: ?offset=0, ?offset=1, etc.
             location: query
+            # Integer type for numeric increments
             type: int
+            # Start with offset=0
             default: 0
+            # Increment by 1 each page
             increment: "+ 1"
+        # Stop condition: when offset exceeds 1 (fetches pages 0 and 1 only)
         stopOn:
           - type: requestParam
+            # Check the query parameter value
             param: ".query.offset"
+            # Stop when offset > 1
             compare: gt
             value: 1
 
+    # Extract data from each page's response
     resultTransformer: .data
-    

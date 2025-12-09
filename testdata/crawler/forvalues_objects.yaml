@@ -1,0 +1,29 @@
+# Test: forValues with object values
+# Demonstrates that forValues can iterate over objects, not just primitives
+# Object properties are accessible directly (e.g., .lang.code, .lang.name)
+
+rootContext: []
+
+steps:
+  - type: forValues
+    name: "Iterate over language objects"
+    values:
+      - { code: "en", name: "English" }
+      - { code: "de", name: "German" }
+      - { code: "it", name: "Italian" }
+    as: lang
+    steps:
+      - type: request
+        name: "Fetch language data"
+        request:
+          # Access object properties directly
+          url: "https://api.example.com/languages/{{ .lang.code }}"
+          method: GET
+        resultTransformer: |
+          {
+            code: $ctx.lang.code,
+            name: $ctx.lang.name,
+            data: .data
+          }
+        # Append to root array
+        mergeOn: . += [$res]

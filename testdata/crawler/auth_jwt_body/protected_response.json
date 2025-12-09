@@ -1,0 +1,8 @@
+{
+  "data": {
+    "records": [
+      {"id": "rec-1", "content": "Protected record 1"},
+      {"id": "rec-2", "content": "Protected record 2"}
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+# Test: forValues for Context Preservation in Nested Structures
+# This test demonstrates using forValues to iterate over literal values
+# when you need nested requests to access outer forValues variables.
+#
+# Use case: Loading categories by type, then fetching products for each category,
+# where product requests need to access the original type.
+
+rootContext: []
+
+steps:
+  # Iterate over category types using forValues
+  - type: forValues
+    name: "Iterate category types"
+    values: ["electronics", "clothing"]
+    as: categoryType
+    steps:
+      # Fetch categories for this type
+      # .categoryType is directly accessible (no .value wrapper with forValues)
+      - type: request
+        name: "Load categories by type"
+        request:
+          url: "https://api.store.com/v1/categories?type={{ .categoryType }}"
+          method: GET
+        resultTransformer: .categories
+        noopMerge: true
+        steps:
+          # Iterate over categories
+          - type: forEach
+            path: .
+            as: category
+            steps:
+              # Fetch products for this category
+              # This request can access .categoryType (from forValues) AND .category (from forEach)
+              - type: request
+                name: "Fetch products"
+                request:
+                  url: "https://api.store.com/v1/products?type={{ .categoryType }}&categoryId={{ .category.id }}"
+                  method: GET
+                resultTransformer: |
+                  .products | map({
+                    id,
+                    name,
+                    categoryType: $ctx.categoryType,
+                    categoryName: $ctx.category.name
+                  })
+                # Merge products into root array
+                mergeWithContext:
+                  name: root
+                  rule: ". += $res"

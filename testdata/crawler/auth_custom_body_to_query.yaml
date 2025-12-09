@@ -1,0 +1,46 @@
+# Test: Custom Authentication (Body to Query Parameter)
+# This test extracts an API key from login response body
+# and injects it as a query parameter in subsequent requests
+# Common pattern for REST APIs that use api_key= URL parameters
+
+rootContext: []
+
+# Custom auth: extract from body, inject into query string
+auth:
+  type: custom
+  loginRequest:
+    url: https://api.provider.com/v1/authenticate
+    method: POST
+    headers:
+      Content-Type: application/x-www-form-urlencoded
+    body:
+      client_id: app_client_123
+      client_secret: app_secret_456
+  # Extract API key from response body using jq
+  extractFrom: body
+  extractSelector: .credentials.apiKey
+  # Inject as query parameter
+  injectInto: query
+  injectKey: api_key
+  maxAgeSeconds: 7200
+
+steps:
+  - type: request
+    name: "Query sensor data"
+    request:
+      url: https://api.provider.com/v1/sensors
+      method: GET
+    # The API key will be automatically appended: ?api_key=<extracted_key>
+    resultTransformer: .sensors
+
+  - type: forEach
+    name: "Get details for each sensor"
+    path: .
+    as: sensor
+    steps:
+      - type: request
+        name: "Get sensor readings"
+        request:
+          url: https://api.provider.com/v1/sensors/{{ .sensor.id }}/readings
+          method: GET
+        mergeOn: .readings = $res

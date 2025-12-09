@@ -1,0 +1,12 @@
+{
+  "yaml.schemas": {
+    "../schemas/silky-schema.json": [
+      "*.silky.yaml",
+      "*.silky.yml"
+    ]
+  },
+  "files.associations": {
+    "*.silky.yaml": "yaml",
+    "*.silky.yml": "yaml"
+  }
+}

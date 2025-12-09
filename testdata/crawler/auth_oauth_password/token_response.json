@@ -1,0 +1,6 @@
+{
+  "access_token": "oauth2_access_token_abc123",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "oauth2_refresh_token_xyz789"
+}

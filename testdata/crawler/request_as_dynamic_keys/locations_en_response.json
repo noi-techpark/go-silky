@@ -1,0 +1,6 @@
+{
+  "locations": [
+    {"id": "loc-1", "name": "Downtown", "description": "City center area"},
+    {"id": "loc-2", "name": "Airport", "description": "International airport"}
+  ]
+}

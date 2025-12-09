@@ -1,0 +1,5 @@
+{
+  "access_token": "client_credentials_token_def456",
+  "token_type": "Bearer",
+  "expires_in": 7200
+}

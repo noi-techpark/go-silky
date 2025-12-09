@@ -1,0 +1,6 @@
+{
+  "categories": [
+    {"id": "cat-c1", "name": "Shirts", "type": "clothing"},
+    {"id": "cat-c2", "name": "Pants", "type": "clothing"}
+  ]
+}

@@ -1,0 +1,14 @@
+mocks:
+  - request:
+      method: POST
+      url: https://api.example.com/users
+      headers:
+        Content-Type: application/json
+      body:
+        username: testuser
+        email: test@example.com
+    response:
+      statusCode: 200
+      headers:
+        Content-Type: application/json
+      bodyFile: testdata/crawler/post_json_body/response.json

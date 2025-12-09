@@ -1,0 +1,587 @@
+{
+  "Basic Configuration": {
+    "prefix": "silky-basic",
+    "body": [
+      "rootContext: []",
+      "steps:",
+      "  - type: request",
+      "    name: \"${1:Fetch data}\"",
+      "    request:",
+      "      url: \"${2:https://api.example.com/endpoint}\"",
+      "      method: ${3|GET,POST|}",
+      "    resultTransformer: ${4:.data}",
+      "    mergeOn: \". = \\$res\"",
+      "    $0"
+    ],
+    "description": "Basic Silky configuration with single request"
+  },
+  "Basic Configuration Object": {
+    "prefix": "silky-basic-object",
+    "body": [
+      "rootContext: {}",
+      "steps:",
+      "  - type: request",
+      "    name: \"${1:Fetch data}\"",
+      "    request:",
+      "      url: \"${2:https://api.example.com/endpoint}\"",
+      "      method: ${3|GET,POST|}",
+      "    resultTransformer: ${4:.}",
+      "    mergeOn: \". = \\$res\"",
+      "    $0"
+    ],
+    "description": "Basic Silky configuration with object root context"
+  },
+  "Request Step": {
+    "prefix": "silky-request",
+    "body": [
+      "- type: request",
+      "  name: \"${1:Request name}\"",
+      "  request:",
+      "    url: \"${2:https://api.example.com/endpoint}\"",
+      "    method: ${3|GET,POST|}",
+      "  ${4:resultTransformer: .data}",
+      "  $0"
+    ],
+    "description": "HTTP request step"
+  },
+  "Request with Headers": {
+    "prefix": "silky-request-headers",
+    "body": [
+      "- type: request",
+      "  name: \"${1:Request name}\"",
+      "  request:",
+      "    url: \"${2:https://api.example.com/endpoint}\"",
+      "    method: ${3:GET}",
+      "    headers:",
+      "      ${4:Accept}: \"${5:application/json}\"",
+      "  resultTransformer: ${6:.data}",
+      "  $0"
+    ],
+    "description": "Request step with custom headers"
+  },
+  "POST Request JSON": {
+    "prefix": "silky-request-post-json",
+    "body": [
+      "- type: request",
+      "  name: \"${1:POST request}\"",
+      "  request:",
+      "    url: \"${2:https://api.example.com/endpoint}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/json\"",
+      "    body:",
+      "      ${3:key1}: \"${4:value1}\"",
+      "      ${5:key2}: ${6:value2}",
+      "  resultTransformer: ${7:.data}",
+      "  $0"
+    ],
+    "description": "POST request with JSON body"
+  },
+  "POST Request Form": {
+    "prefix": "silky-request-post-form",
+    "body": [
+      "- type: request",
+      "  name: \"${1:POST request}\"",
+      "  request:",
+      "    url: \"${2:https://api.example.com/endpoint}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/x-www-form-urlencoded\"",
+      "    body:",
+      "      ${3:key1}: \"${4:value1}\"",
+      "      ${5:key2}: \"${6:value2}\"",
+      "  resultTransformer: ${7:.data}",
+      "  $0"
+    ],
+    "description": "POST request with form-urlencoded body"
+  },
+  "Request with Template URL": {
+    "prefix": "silky-request-template",
+    "body": [
+      "- type: request",
+      "  name: \"${1:Fetch details}\"",
+      "  request:",
+      "    url: \"${2:https://api.example.com/items/}{{.${3:item}.${4:id}}}\"",
+      "    method: GET",
+      "  resultTransformer: ${5:.}",
+      "  $0"
+    ],
+    "description": "Request with Go template URL interpolation"
+  },
+  "ForEach Step": {
+    "prefix": "silky-foreach",
+    "body": [
+      "- type: forEach",
+      "  name: \"${1:Iterate items}\"",
+      "  path: ${2:.items}",
+      "  as: ${3:item}",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${4:Fetch item details}\"",
+      "      request:",
+      "        url: \"${5:https://api.example.com/items/}{{.${3:item}.id}}\"",
+      "        method: GET",
+      "      $0"
+    ],
+    "description": "ForEach iteration step with nested request"
+  },
+  "ForEach Parallel": {
+    "prefix": "silky-foreach-parallel",
+    "body": [
+      "- type: forEach",
+      "  name: \"${1:Parallel iteration}\"",
+      "  path: ${2:.items}",
+      "  as: ${3:item}",
+      "  parallelism:",
+      "    maxConcurrency: ${4:10}",
+      "    requestsPerSecond: ${5:5.0}",
+      "    burst: ${6:2}",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${7:Fetch item details}\"",
+      "      request:",
+      "        url: \"${8:https://api.example.com/items/}{{.${3:item}.id}}\"",
+      "        method: GET",
+      "      $0"
+    ],
+    "description": "Parallel forEach with rate limiting"
+  },
+  "ForEach with Noop Merge": {
+    "prefix": "silky-foreach-noop",
+    "body": [
+      "- type: forEach",
+      "  name: \"${1:Iterate items}\"",
+      "  path: ${2:.items}",
+      "  as: ${3:item}",
+      "  noopMerge: true",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${4:Fetch and merge}\"",
+      "      request:",
+      "        url: \"${5:https://api.example.com/items/}{{.${3:item}.id}}\"",
+      "        method: GET",
+      "      mergeWithParentOn: ${6:.results += [\\$res]}",
+      "      $0"
+    ],
+    "description": "ForEach with noop merge - nested steps handle merging"
+  },
+  "ForEach Nested": {
+    "prefix": "silky-foreach-nested",
+    "body": [
+      "- type: forEach",
+      "  name: \"${1:Iterate categories}\"",
+      "  path: ${2:.categories}",
+      "  as: ${3:category}",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${4:Fetch category items}\"",
+      "      request:",
+      "        url: \"${5:https://api.example.com/categories/}{{.${3:category}.id}}/items\"",
+      "        method: GET",
+      "      resultTransformer: .items",
+      "      mergeOn: \". = \\$res\"",
+      "    - type: forEach",
+      "      name: \"${6:Iterate items}\"",
+      "      path: .",
+      "      as: ${7:item}",
+      "      steps:",
+      "        - type: request",
+      "          name: \"${8:Fetch item details}\"",
+      "          request:",
+      "            url: \"${9:https://api.example.com/items/}{{.${7:item}.id}}\"",
+      "            method: GET",
+      "          $0"
+    ],
+    "description": "Nested forEach for multi-level iteration"
+  },
+  "ForValues Step": {
+    "prefix": "silky-forvalues",
+    "body": [
+      "- type: forValues",
+      "  name: \"${1:Iterate values}\"",
+      "  values:",
+      "    - ${2:value1}",
+      "    - ${3:value2}",
+      "    - ${4:value3}",
+      "  as: ${5:val}",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${6:Fetch by value}\"",
+      "      request:",
+      "        url: \"${7:https://api.example.com/items/}{{.${5:val}}}\"",
+      "        method: GET",
+      "      mergeWithParentOn: \". += [\\$res]\"",
+      "      $0"
+    ],
+    "description": "ForValues iteration over literal values"
+  },
+  "ForValues with Objects": {
+    "prefix": "silky-forvalues-objects",
+    "body": [
+      "- type: forValues",
+      "  name: \"${1:Iterate configs}\"",
+      "  values:",
+      "    - id: ${2:1}",
+      "      name: \"${3:first}\"",
+      "    - id: ${4:2}",
+      "      name: \"${5:second}\"",
+      "  as: ${6:config}",
+      "  steps:",
+      "    - type: request",
+      "      name: \"${7:Fetch by config}\"",
+      "      request:",
+      "        url: \"${8:https://api.example.com/}{{.${6:config}.id}}\"",
+      "        method: GET",
+      "      $0"
+    ],
+    "description": "ForValues iteration over object values"
+  },
+  "Merge with Parent": {
+    "prefix": "silky-merge-parent",
+    "body": [
+      "mergeWithParentOn: ${1:.items += [\\$res]}",
+      "$0"
+    ],
+    "description": "Merge result with immediate parent context"
+  },
+  "Merge On": {
+    "prefix": "silky-merge-on",
+    "body": [
+      "mergeOn: ${1:\". = \\$res\"}",
+      "$0"
+    ],
+    "description": "Merge result with current context"
+  },
+  "Merge with Named Context": {
+    "prefix": "silky-merge-context",
+    "body": [
+      "mergeWithContext:",
+      "  name: ${1:contextName}",
+      "  rule: ${2:.details = \\$res}",
+      "$0"
+    ],
+    "description": "Merge result with named ancestor context"
+  },
+  "Pagination Next URL": {
+    "prefix": "silky-pagination-url",
+    "body": [
+      "pagination:",
+      "  nextPageUrlSelector: \"body:${1:.links.next}\"",
+      "$0"
+    ],
+    "description": "Pagination using next URL from response body"
+  },
+  "Pagination Offset/Limit": {
+    "prefix": "silky-pagination-offset",
+    "body": [
+      "pagination:",
+      "  params:",
+      "    - name: offset",
+      "      location: query",
+      "      type: int",
+      "      default: \"0\"",
+      "      increment: \"+ ${1:20}\"",
+      "    - name: limit",
+      "      location: query",
+      "      type: int",
+      "      default: \"${1:20}\"",
+      "  stopOn:",
+      "    - type: responseBody",
+      "      expression: \"${2:(. | length) < $1}\"",
+      "$0"
+    ],
+    "description": "Pagination with offset and limit parameters"
+  },
+  "Pagination Cursor": {
+    "prefix": "silky-pagination-cursor",
+    "body": [
+      "pagination:",
+      "  params:",
+      "    - name: ${1:cursor}",
+      "      location: query",
+      "      type: dynamic",
+      "      source: \"body:${2:.pagination.next_cursor}\"",
+      "  stopOn:",
+      "    - type: responseBody",
+      "      expression: \"${3:.pagination.next_cursor == null}\"",
+      "$0"
+    ],
+    "description": "Cursor-based pagination"
+  },
+  "Pagination Page Number": {
+    "prefix": "silky-pagination-page",
+    "body": [
+      "pagination:",
+      "  params:",
+      "    - name: page",
+      "      location: query",
+      "      type: int",
+      "      default: \"1\"",
+      "      increment: \"+ 1\"",
+      "  stopOn:",
+      "    - type: pageNum",
+      "      value: ${1:10}",
+      "$0"
+    ],
+    "description": "Pagination with page number and max pages limit"
+  },
+  "Pagination Datetime": {
+    "prefix": "silky-pagination-datetime",
+    "body": [
+      "pagination:",
+      "  params:",
+      "    - name: ${1:from}",
+      "      location: query",
+      "      type: datetime",
+      "      format: \"${2:2006-01-02}\"",
+      "      default: \"${3:now-30d}\"",
+      "      increment: \"+${4:1d}\"",
+      "  stopOn:",
+      "    - type: requestParam",
+      "      param: \".query.${1:from}\"",
+      "      compare: gte",
+      "      value: \"${5:now}\"",
+      "$0"
+    ],
+    "description": "Datetime-based pagination with time range"
+  },
+  "Stop on Response Body": {
+    "prefix": "silky-stop-body",
+    "body": [
+      "- type: responseBody",
+      "  expression: \"${1:(. | length) == 0}\"",
+      "$0"
+    ],
+    "description": "Stop pagination when response body condition is met"
+  },
+  "Stop on Page Number": {
+    "prefix": "silky-stop-pagenum",
+    "body": [
+      "- type: pageNum",
+      "  value: ${1:10}",
+      "$0"
+    ],
+    "description": "Stop pagination after max pages"
+  },
+  "Stop on Request Param": {
+    "prefix": "silky-stop-param",
+    "body": [
+      "- type: requestParam",
+      "  param: \".${1:query}.${2:offset}\"",
+      "  compare: ${3|gte,gt,lte,lt,eq|}",
+      "  value: ${4:1000}",
+      "$0"
+    ],
+    "description": "Stop pagination when request param reaches value"
+  },
+  "Auth Basic": {
+    "prefix": "silky-auth-basic",
+    "body": [
+      "auth:",
+      "  type: basic",
+      "  username: \"${1:username}\"",
+      "  password: \"${2:password}\"",
+      "$0"
+    ],
+    "description": "Basic HTTP authentication"
+  },
+  "Auth Bearer": {
+    "prefix": "silky-auth-bearer",
+    "body": [
+      "auth:",
+      "  type: bearer",
+      "  token: \"${1:your_bearer_token}\"",
+      "$0"
+    ],
+    "description": "Bearer token authentication"
+  },
+  "Auth OAuth Password": {
+    "prefix": "silky-auth-oauth-password",
+    "body": [
+      "auth:",
+      "  type: oauth",
+      "  method: password",
+      "  tokenUrl: \"${1:https://auth.example.com/token}\"",
+      "  username: \"${2:username}\"",
+      "  password: \"${3:password}\"",
+      "  clientId: \"${4:client_id}\"",
+      "  clientSecret: \"${5:client_secret}\"",
+      "  ${6:scopes:}",
+      "    ${7:- read}",
+      "$0"
+    ],
+    "description": "OAuth2 password grant authentication"
+  },
+  "Auth OAuth Client Credentials": {
+    "prefix": "silky-auth-oauth-client",
+    "body": [
+      "auth:",
+      "  type: oauth",
+      "  method: client_credentials",
+      "  tokenUrl: \"${1:https://auth.example.com/token}\"",
+      "  clientId: \"${2:client_id}\"",
+      "  clientSecret: \"${3:client_secret}\"",
+      "  ${4:scopes:}",
+      "    ${5:- read}",
+      "$0"
+    ],
+    "description": "OAuth2 client credentials flow"
+  },
+  "Auth Cookie": {
+    "prefix": "silky-auth-cookie",
+    "body": [
+      "auth:",
+      "  type: cookie",
+      "  extractSelector: \"${1:session_cookie}\"",
+      "  loginRequest:",
+      "    url: \"${2:https://api.example.com/login}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/json\"",
+      "    body:",
+      "      username: \"${3:username}\"",
+      "      password: \"${4:password}\"",
+      "  ${5:maxAgeSeconds: 3600}",
+      "$0"
+    ],
+    "description": "Cookie-based authentication"
+  },
+  "Auth JWT": {
+    "prefix": "silky-auth-jwt",
+    "body": [
+      "auth:",
+      "  type: jwt",
+      "  extractFrom: body",
+      "  extractSelector: \"${1:.token}\"",
+      "  loginRequest:",
+      "    url: \"${2:https://api.example.com/login}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/json\"",
+      "    body:",
+      "      username: \"${3:username}\"",
+      "      password: \"${4:password}\"",
+      "  ${5:maxAgeSeconds: 3600}",
+      "$0"
+    ],
+    "description": "JWT authentication with token from response body"
+  },
+  "Auth JWT Header": {
+    "prefix": "silky-auth-jwt-header",
+    "body": [
+      "auth:",
+      "  type: jwt",
+      "  extractFrom: header",
+      "  extractSelector: \"${1:X-Auth-Token}\"",
+      "  loginRequest:",
+      "    url: \"${2:https://api.example.com/login}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/json\"",
+      "    body:",
+      "      username: \"${3:username}\"",
+      "      password: \"${4:password}\"",
+      "  ${5:maxAgeSeconds: 3600}",
+      "$0"
+    ],
+    "description": "JWT authentication with token from response header"
+  },
+  "Auth Custom": {
+    "prefix": "silky-auth-custom",
+    "body": [
+      "auth:",
+      "  type: custom",
+      "  extractFrom: ${1|body,cookie,header|}",
+      "  extractSelector: \"${2:.access_token}\"",
+      "  injectInto: ${3|bearer,header,cookie,query|}",
+      "  ${4:injectKey: \"${5:X-API-Key}\"}",
+      "  loginRequest:",
+      "    url: \"${6:https://api.example.com/auth}\"",
+      "    method: POST",
+      "    headers:",
+      "      Content-Type: \"application/json\"",
+      "    body:",
+      "      ${7:api_key}: \"${8:your_key}\"",
+      "  ${9:maxAgeSeconds: 3600}",
+      "$0"
+    ],
+    "description": "Custom authentication with configurable extraction and injection"
+  },
+  "Parallelism Config": {
+    "prefix": "silky-parallelism",
+    "body": [
+      "parallelism:",
+      "  maxConcurrency: ${1:10}",
+      "  requestsPerSecond: ${2:5.0}",
+      "  burst: ${3:2}",
+      "$0"
+    ],
+    "description": "Parallel execution configuration"
+  },
+  "Stream Mode": {
+    "prefix": "silky-stream",
+    "body": [
+      "rootContext: []",
+      "stream: true",
+      "steps:",
+      "  $0"
+    ],
+    "description": "Enable streaming mode for incremental results"
+  },
+  "Global Headers": {
+    "prefix": "silky-headers",
+    "body": [
+      "headers:",
+      "  ${1:User-Agent}: \"${2:Silky/1.0}\"",
+      "  ${3:Accept}: \"${4:application/json}\"",
+      "$0"
+    ],
+    "description": "Global HTTP headers"
+  },
+  "Result Transformer": {
+    "prefix": "silky-transformer",
+    "body": [
+      "resultTransformer: ${1:.data | map({id, name})}",
+      "$0"
+    ],
+    "description": "jq expression to transform API response"
+  },
+  "Complete Example": {
+    "prefix": "silky-complete",
+    "body": [
+      "rootContext: []",
+      "headers:",
+      "  User-Agent: \"Silky/1.0\"",
+      "auth:",
+      "  type: ${1|bearer,oauth,basic|}",
+      "  ${2:token: \"your_token\"}",
+      "steps:",
+      "  - type: request",
+      "    name: \"Fetch initial data\"",
+      "    request:",
+      "      url: \"${3:https://api.example.com/items}\"",
+      "      method: GET",
+      "      pagination:",
+      "        nextPageUrlSelector: \"body:.links.next\"",
+      "    resultTransformer: .items",
+      "    mergeOn: \". = \\$res\"",
+      "  - type: forEach",
+      "    name: \"Enrich each item\"",
+      "    path: .",
+      "    as: item",
+      "    parallelism:",
+      "      maxConcurrency: 5",
+      "      requestsPerSecond: 10.0",
+      "      burst: 2",
+      "    steps:",
+      "      - type: request",
+      "        name: \"Fetch item details\"",
+      "        request:",
+      "          url: \"${4:https://api.example.com/items/}{{.item.id}}\"",
+      "          method: GET",
+      "        resultTransformer: .data",
+      "        $0"
+    ],
+    "description": "Complete example with pagination, parallel execution, and rate limiting"
+  }
+}

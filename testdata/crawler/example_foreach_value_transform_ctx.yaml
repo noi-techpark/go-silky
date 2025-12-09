@@ -1,24 +1,37 @@
+# Test: Using $ctx variable in resultTransformer with forValues
+# Demonstrates: accessing context variables within jq transformations to build enriched results
+
+# Start with empty array
 rootContext: []
-  
+
 steps:
-  - type: forEach
-    path: "."
+  - type: forValues
+    name: Iterate facility IDs
+    # Static array of values to iterate over
     values: ["1", "2"]
+    # Each value is accessible directly as .id (no .value wrapper with forValues)
     as: id
-      
+
     steps:
       - type: request
         name: Get Facility Free Places
         request:
-          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id.value }}
+          # Template uses the current iteration value directly via .id
+          url: https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID={{ .id }}
           method: GET
           headers:
             Accept: application/json
 
+        # Transform response using $ctx variable to access current context
+        # $ctx.id accesses the forValues iteration value directly (no .value wrapper)
+        # This creates an enriched object: { id: "1", places: {...} }
         resultTransformer: |
           .FreePlaces as $places |
           {
-            id: $ctx.id.value,
+            id: $ctx.id,
             places: $places
           }
-        mergeOn:  . = $res
+        # Append transformed result to root array
+        mergeWithContext:
+          name: root
+          rule: ". += [$res]"

@@ -1,0 +1,6 @@
+{
+  "reports": [
+    {"id": "rpt-1", "title": "Monthly Report", "created": "2024-01-01"},
+    {"id": "rpt-2", "title": "Quarterly Report", "created": "2024-03-01"}
+  ]
+}

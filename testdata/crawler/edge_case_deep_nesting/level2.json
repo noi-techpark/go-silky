@@ -1,0 +1,6 @@
+{
+  "nested": {
+    "nestedId": "L2",
+    "parentRef": "L1"
+  }
+}

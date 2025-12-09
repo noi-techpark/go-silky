@@ -1,0 +1,8 @@
+{
+  "results": [
+    {"id": 1, "title": "Go Programming Book", "offset": 0},
+    {"id": 2, "title": "Golang Tutorial", "offset": 0},
+    {"id": 3, "title": "Advanced Go Patterns", "offset": 10},
+    {"id": 4, "title": "Go Concurrency", "offset": 10}
+  ]
+}

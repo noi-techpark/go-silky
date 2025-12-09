@@ -1,0 +1,8 @@
+{
+  "data": {
+    "items": [
+      {"id": "res-1", "name": "Resource One", "type": "document"},
+      {"id": "res-2", "name": "Resource Two", "type": "image"}
+    ]
+  }
+}

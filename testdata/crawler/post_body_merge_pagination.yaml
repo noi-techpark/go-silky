@@ -1,0 +1,37 @@
+# Test: POST request with body-based pagination
+# Demonstrates: pagination parameter in POST body, pageNum stop condition, result accumulation
+
+# Initialize root context with results array
+rootContext:
+  results: []
+
+steps:
+  - type: request
+    name: Search with Pagination and Filters
+    request:
+      url: https://api.example.com/search
+      method: POST
+      headers:
+        Content-Type: application/json
+      # POST body with static search parameters
+      body:
+        query: "golang"
+        filters:
+          category: "programming"
+      # Pagination configuration
+      pagination:
+        # Stop after 2 pages (pages 0 and 1)
+        stopOn:
+          - type: pageNum
+            compare: gte  # Note: pageNum type currently ignores compare field and always uses >=
+            value: 2
+        params:
+          # Pagination parameter added to POST body
+          - name: offset
+            location: body  # Inject into request body (not query string)
+            type: int
+            increment: "+ 10"  # Increment offset by 10 each page
+            default: "0"
+    # Append each page's results to .results array
+    # $res contains the current page's response
+    mergeOn: .results += $res

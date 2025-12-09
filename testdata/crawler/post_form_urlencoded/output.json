@@ -1,0 +1,9 @@
+{
+  "results": [
+    {
+      "token": "abc123xyz",
+      "user": "admin",
+      "authenticated": true
+    }
+  ]
+}
