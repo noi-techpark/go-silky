@@ -1,12 +1,12 @@
 {
   "yaml.schemas": {
-    "../schemas/apigorowler-schema.json": [
-      "*.apigorowler.yaml",
-      "*.apigorowler.yml"
+    "../schemas/silky-schema.json": [
+      "*.silky.yaml",
+      "*.silky.yml"
     ]
   },
   "files.associations": {
-    "*.apigorowler.yaml": "yaml",
-    "*.apigorowler.yml": "yaml"
+    "*.silky.yaml": "yaml",
+    "*.silky.yml": "yaml"
   }
 }

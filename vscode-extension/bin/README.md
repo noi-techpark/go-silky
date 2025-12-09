@@ -1,15 +1,15 @@
-# ApiGorowler Binaries
+# Silky Binaries
 
 This directory contains pre-built binaries for different platforms.
 
 ## Available Binaries
 
-- **linux/amd64**: `apigorowler-linux-amd64` (9.77 MB)
-- **linux/arm64**: `apigorowler-linux-arm64` (9.31 MB)
-- **darwin/amd64**: `apigorowler-darwin-amd64` (10.04 MB)
-- **darwin/arm64**: `apigorowler-darwin-arm64` (9.53 MB)
-- **windows/amd64**: `apigorowler-windows-amd64.exe` (10.08 MB)
-- **windows/arm64**: `apigorowler-windows-arm64.exe` (9.36 MB)
+- **linux/amd64**: `silky-linux-amd64` (9.85 MB)
+- **linux/arm64**: `silky-linux-arm64` (9.38 MB)
+- **darwin/amd64**: `silky-darwin-amd64` (10.13 MB)
+- **darwin/arm64**: `silky-darwin-arm64` (9.61 MB)
+- **windows/amd64**: `silky-windows-amd64.exe` (10.17 MB)
+- **windows/arm64**: `silky-windows-arm64.exe` (9.43 MB)
 
 ## Usage
 
@@ -18,7 +18,7 @@ The extension automatically selects the appropriate binary for your platform.
 You can also run the binary directly from the command line:
 
 ```bash
-./apigorowler-<platform>-<arch> -config path/to/config.apigorowler.yaml -profiler
+./silky-<platform>-<arch> -config path/to/config.silky.yaml -profiler
 ```
 
 ### Flags

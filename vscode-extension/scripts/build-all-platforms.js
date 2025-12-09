@@ -10,7 +10,7 @@ const projectRoot = path.join(extensionDir, '..');
 const binDir = path.join(extensionDir, 'bin');
 const cliDir = path.join(projectRoot, 'cmd', 'cli');
 
-console.log('Building apigorowler binaries for all platforms...');
+console.log('Building silky binaries for all platforms...');
 console.log(`Extension dir: ${extensionDir}`);
 console.log(`Project root: ${projectRoot}`);
 
@@ -33,7 +33,7 @@ const builtBinaries = [];
 
 for (const platform of platforms) {
     const { goos, goarch, ext } = platform;
-    const binaryName = `apigorowler-${goos}-${goarch}${ext}`;
+    const binaryName = `silky-${goos}-${goarch}${ext}`;
     const outputPath = path.join(binDir, binaryName);
 
     console.log(`\nBuilding for ${goos}/${goarch}...`);
@@ -71,9 +71,9 @@ for (const binary of builtBinaries) {
 const currentPlatform = os.platform();
 const currentArch = os.arch() === 'x64' ? 'amd64' : os.arch();
 const currentExt = currentPlatform === 'win32' ? '.exe' : '';
-const platformBinary = `apigorowler-${currentPlatform === 'win32' ? 'windows' : currentPlatform === 'darwin' ? 'darwin' : 'linux'}-${currentArch}${currentExt}`;
+const platformBinary = `silky-${currentPlatform === 'win32' ? 'windows' : currentPlatform === 'darwin' ? 'darwin' : 'linux'}-${currentArch}${currentExt}`;
 const platformBinaryPath = path.join(binDir, platformBinary);
-const genericPath = path.join(binDir, `apigorowler${currentExt}`);
+const genericPath = path.join(binDir, `silky${currentExt}`);
 
 if (fs.existsSync(platformBinaryPath)) {
     if (fs.existsSync(genericPath)) {
@@ -83,16 +83,16 @@ if (fs.existsSync(platformBinaryPath)) {
     if (currentPlatform === 'win32') {
         // On Windows, copy instead of symlink
         fs.copyFileSync(platformBinaryPath, genericPath);
-        console.log(`\n✓ Created generic binary: apigorowler${currentExt} (copy)`);
+        console.log(`\n✓ Created generic binary: silky${currentExt} (copy)`);
     } else {
         fs.symlinkSync(platformBinary, genericPath);
-        console.log(`\n✓ Created symlink: apigorowler → ${platformBinary}`);
+        console.log(`\n✓ Created symlink: silky → ${platformBinary}`);
     }
 }
 
 // Create a README in the bin directory
 const readmePath = path.join(binDir, 'README.md');
-const readmeContent = `# ApiGorowler Binaries
+const readmeContent = `# Silky Binaries
 
 This directory contains pre-built binaries for different platforms.
 
@@ -107,7 +107,7 @@ The extension automatically selects the appropriate binary for your platform.
 You can also run the binary directly from the command line:
 
 \`\`\`bash
-./apigorowler-<platform>-<arch> -config path/to/config.apigorowler.yaml -profiler
+./silky-<platform>-<arch> -config path/to/config.silky.yaml -profiler
 \`\`\`
 
 ### Flags

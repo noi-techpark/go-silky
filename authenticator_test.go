@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package apigorowler
+package silky
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	crawler_testing "github.com/noi-techpark/go-apigorowler/testing"
+	crawler_testing "github.com/noi-techpark/go-silky/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

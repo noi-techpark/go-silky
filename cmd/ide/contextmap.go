@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/noi-techpark/go-apigorowler"
+	silky "github.com/noi-techpark/go-silky"
 	"github.com/rivo/tview"
 )
 
@@ -338,15 +338,15 @@ func (v *ContextMapViewer) Close() {
 }
 
 // ShowContextMap shows the context map for the given event data
-func (c *ConsoleApp) showContextMapForEvent(data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) showContextMapForEvent(data silky.StepProfilerData) {
 	var contextData any
 	var title string
 
 	switch data.Type {
-	case apigorowler.EVENT_URL_COMPOSITION:
+	case silky.EVENT_URL_COMPOSITION:
 		contextData = data.Data["goTemplateContext"]
 		title = " Template Context "
-	case apigorowler.EVENT_CONTEXT_SELECTION, apigorowler.EVENT_CONTEXT_MERGE:
+	case silky.EVENT_CONTEXT_SELECTION, silky.EVENT_CONTEXT_MERGE:
 		contextData = data.Data["fullContextMap"]
 		title = " Context Map "
 	default:

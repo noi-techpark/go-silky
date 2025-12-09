@@ -13,7 +13,7 @@ steps:
       method: POST
       headers:
         # Content-Type for form-urlencoded format
-        # ApiGorowler will encode body as: username=admin&password=secret123
+        # Silky will encode body as: username=admin&password=secret123
         Content-Type: application/x-www-form-urlencoded
       # Body will be automatically URL-encoded based on Content-Type
       body:

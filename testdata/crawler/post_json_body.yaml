@@ -13,7 +13,7 @@ steps:
       method: POST
       headers:
         # IMPORTANT: Content-Type must be specified for POST with body
-        # This tells ApiGorowler to JSON-encode the body
+        # This tells Silky to JSON-encode the body
         Content-Type: application/json
       # Request body - will be automatically JSON-encoded
       body:

@@ -21,7 +21,7 @@ export class TimelinePanel {
             message => {
                 switch (message.command) {
                     case 'selectEvent':
-                        vscode.commands.executeCommand('apigorowler.showStepDetails', message.event);
+                        vscode.commands.executeCommand('silky.showStepDetails', message.event);
                         break;
                 }
             },
@@ -40,7 +40,7 @@ export class TimelinePanel {
 
         // Otherwise, create a new panel beside the editor
         const panel = vscode.window.createWebviewPanel(
-            'apigorowlerTimeline',
+            'silkyTimeline',
             'Execution Timeline',
             vscode.ViewColumn.Two,
             {

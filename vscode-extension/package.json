@@ -1,7 +1,7 @@
 {
-  "name": "apigorowler-vscode",
-  "displayName": "ApiGorowler",
-  "description": "Development and debugging tool for ApiGorowler YAML configurations",
+  "name": "silky-vscode",
+  "displayName": "Silky",
+  "description": "Development and debugging tool for Silky YAML configurations",
   "version": "0.1.0",
   "publisher": "noi-techpark",
   "engines": {
@@ -21,123 +21,123 @@
   ],
   "activationEvents": [
     "onLanguage:yaml",
-    "workspaceContains:**/*.apigorowler.yaml",
-    "onCommand:apigorowler.run",
-    "onView:apigorowler.stepsExplorer"
+    "workspaceContains:**/*.silky.yaml",
+    "onCommand:silky.run",
+    "onView:silky.stepsExplorer"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "apigorowler.run",
-        "title": "Run ApiGorowler Configuration",
+        "command": "silky.run",
+        "title": "Run Silky Configuration",
         "icon": "$(play)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.stop",
+        "command": "silky.stop",
         "title": "Stop Execution",
         "icon": "$(debug-stop)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.debug",
+        "command": "silky.debug",
         "title": "Debug Configuration",
         "icon": "$(debug-alt)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.validateConfig",
+        "command": "silky.validateConfig",
         "title": "Validate Configuration",
         "icon": "$(check)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.exportSteps",
+        "command": "silky.exportSteps",
         "title": "Export Execution Steps",
         "icon": "$(export)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.collapseAllSteps",
+        "command": "silky.collapseAllSteps",
         "title": "Collapse All Steps",
         "icon": "$(collapse-all)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.refreshSteps",
+        "command": "silky.refreshSteps",
         "title": "Refresh",
         "icon": "$(refresh)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.showStepDetails",
+        "command": "silky.showStepDetails",
         "title": "Show Step Details",
         "icon": "$(info)",
-        "category": "ApiGorowler"
+        "category": "Silky"
       },
       {
-        "command": "apigorowler.convertToApiGorowlerYaml",
-        "title": "Convert to ApiGorowler YAML",
-        "category": "ApiGorowler"
+        "command": "silky.convertToSilkyYaml",
+        "title": "Convert to Silky YAML",
+        "category": "Silky"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
-          "command": "apigorowler.run",
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.run",
           "group": "navigation@1"
         },
         {
-          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
-          "command": "apigorowler.stop",
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.stop",
           "group": "navigation@2"
         },
         {
-          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
-          "command": "apigorowler.validateConfig",
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.validateConfig",
           "group": "navigation@3"
         }
       ],
       "view/title": [
         {
-          "command": "apigorowler.refreshSteps",
-          "when": "view == apigorowler.stepsExplorer",
+          "command": "silky.refreshSteps",
+          "when": "view == silky.stepsExplorer",
           "group": "navigation@1"
         },
         {
-          "command": "apigorowler.collapseAllSteps",
-          "when": "view == apigorowler.stepsExplorer",
+          "command": "silky.collapseAllSteps",
+          "when": "view == silky.stepsExplorer",
           "group": "navigation@2"
         },
         {
-          "command": "apigorowler.exportSteps",
-          "when": "view == apigorowler.stepsExplorer",
+          "command": "silky.exportSteps",
+          "when": "view == silky.stepsExplorer",
           "group": "navigation@3"
         }
       ],
       "view/item/context": [
         {
-          "command": "apigorowler.showStepDetails",
-          "when": "view == apigorowler.stepsExplorer",
+          "command": "silky.showStepDetails",
+          "when": "view == silky.stepsExplorer",
           "group": "inline"
         }
       ]
     },
     "views": {
-      "apigorowler": [
+      "silky": [
         {
-          "id": "apigorowler.stepsExplorer",
+          "id": "silky.stepsExplorer",
           "name": "Execution Steps",
           "icon": "$(list-tree)",
-          "contextualTitle": "ApiGorowler Steps"
+          "contextualTitle": "Silky Steps"
         }
       ],
-      "apigorowler-panel": [
+      "silky-panel": [
         {
           "type": "webview",
-          "id": "apigorowler.timeline",
+          "id": "silky.timeline",
           "name": "Execution Timeline"
         }
       ]
@@ -145,43 +145,43 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "apigorowler",
-          "title": "ApiGorowler",
-          "icon": "$(globe)"
+          "id": "silky",
+          "title": "Silky",
+          "icon": "resources/cobweb-spider-web.svg"
         }
       ],
       "panel": [
         {
-          "id": "apigorowler-panel",
-          "title": "ApiGorowler Timeline",
+          "id": "silky-panel",
+          "title": "Silky Timeline",
           "icon": "$(graph-line)"
         }
       ]
     },
     "configuration": {
-      "title": "ApiGorowler",
+      "title": "Silky",
       "properties": {
-        "apigorowler.executable.path": {
+        "silky.executable.path": {
           "type": "string",
           "default": "go",
           "description": "Path to Go executable for running the crawler"
         },
-        "apigorowler.autoValidate": {
+        "silky.autoValidate": {
           "type": "boolean",
           "default": true,
           "description": "Automatically validate configuration on save"
         },
-        "apigorowler.autoRun": {
+        "silky.autoRun": {
           "type": "boolean",
           "default": false,
           "description": "Automatically run crawler when configuration changes"
         },
-        "apigorowler.maxOutputSize": {
+        "silky.maxOutputSize": {
           "type": "number",
           "default": 10000,
           "description": "Maximum number of lines to display in output (0 = unlimited)"
         },
-        "apigorowler.collapseSteps": {
+        "silky.collapseSteps": {
           "type": "boolean",
           "default": false,
           "description": "Collapse all steps by default"
@@ -191,16 +191,16 @@
     "yamlValidation": [
       {
         "fileMatch": [
-          "*.apigorowler.yaml",
-          "*.apigorowler.yml"
+          "*.silky.yaml",
+          "*.silky.yml"
         ],
-        "url": "./schemas/apigorowler-schema.json"
+        "url": "./schemas/silky-schema.json"
       }
     ],
     "snippets": [
       {
         "language": "yaml",
-        "path": "./snippets/apigorowler.json"
+        "path": "./snippets/silky.json"
       }
     ]
   },
@@ -232,7 +232,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/noi-techpark/go-apigorowler"
+    "url": "https://github.com/noi-techpark/go-silky"
   },
   "license": "AGPL-3.0-or-later",
   "icon": "icon.png",

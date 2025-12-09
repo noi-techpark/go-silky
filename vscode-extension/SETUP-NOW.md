@@ -5,15 +5,15 @@ Follow these steps **exactly** in order:
 ## Step 1: Check Your File
 
 ```bash
-cd /home/mroggia/git/go-apigorowler/vscode-extension
+cd /home/mroggia/git/go-silky/vscode-extension
 ls -la *.yaml *.yml 2>/dev/null
 ```
 
-**Expected:** You should see files ending in `.apigorowler.yaml`
+**Expected:** You should see files ending in `.silky.yaml`
 
 **If you see `example.yaml`:** Rename it:
 ```bash
-mv example.yaml example.apigorowler.yaml
+mv example.yaml example.silky.yaml
 ```
 
 ## Step 2: Reload Extension Development Host
@@ -34,7 +34,7 @@ OR just press **`Ctrl+R`**
 ## Step 4: Open Your File
 
 1. In Extension Development Host: **File → Open File**
-2. Navigate to: `/home/mroggia/git/go-apigorowler/vscode-extension/example.apigorowler.yaml`
+2. Navigate to: `/home/mroggia/git/go-silky/vscode-extension/example.silky.yaml`
 3. Click **Open**
 
 ## Step 5: Verify It Works
@@ -49,9 +49,9 @@ You should NOW see:
 ## Step 6: Test Run
 
 1. Click the **▶ Run** button at top-right
-2. **Open Output Panel**: View → Output → Select "ApiGorowler" from dropdown
+2. **Open Output Panel**: View → Output → Select "Silky" from dropdown
 3. **Check for success message**:
-   - Should say: `Using bundled binary: /home/mroggia/git/go-apigorowler/vscode-extension/bin/apigorowler`
+   - Should say: `Using bundled binary: /home/mroggia/git/go-silky/vscode-extension/bin/silky`
    - Should NOT say: `terminal not cursor addressable`
    - Should NOT say: `Could not find cmd/ide`
 
@@ -60,7 +60,7 @@ You should NOW see:
 ### Still No YAML Highlighting?
 
 **Check language in status bar** (bottom-right of VSCode):
-- If it says `"Plain Text"` or `"apigorowler-yaml"` → **Wrong!**
+- If it says `"Plain Text"` or `"silky-yaml"` → **Wrong!**
 - Should say `"YAML"` → **Correct!**
 
 **Force change to YAML**:
@@ -72,10 +72,10 @@ You should NOW see:
 
 ```bash
 # Verify binary exists:
-ls -lh /home/mroggia/git/go-apigorowler/vscode-extension/bin/apigorowler
+ls -lh /home/mroggia/git/go-silky/vscode-extension/bin/silky
 
 # Should show:
-# lrwxrwxrwx ... apigorowler -> apigorowler-linux-amd64
+# lrwxrwxrwx ... silky -> silky-linux-amd64
 ```
 
 **If missing, rebuild**:
@@ -90,22 +90,22 @@ npm run build:binary
 ```bash
 # In terminal:
 basename /path/to/your/file
-# Must end with: .apigorowler.yaml or .apigorowler.yml
+# Must end with: .silky.yaml or .silky.yml
 ```
 
 **Fix if needed**:
 - Use File Explorer in VSCode → Right-click file → Rename
-- Change extension to `.apigorowler.yaml`
+- Change extension to `.silky.yaml`
 
 ## Expected Final Result
 
-After following all steps, opening `example.apigorowler.yaml` should show:
+After following all steps, opening `example.silky.yaml` should show:
 
 ```
 ┌─────────────────────────────────────────────┐
-│ example.apigorowler.yaml          ▶ ⏹ ✓    │  ← These 3 buttons
+│ example.silky.yaml          ▶ ⏹ ✓    │  ← These 3 buttons
 ├─────────────────────────────────────────────┤
-│  1  # Example ApiGorowler Configuration     │  ← Blue comment
+│  1  # Example Silky Configuration           │  ← Blue comment
 │  2  rootContext: []                         │  ← Syntax colors
 │  3                                          │
 │  4  steps:                                  │  ← Yellow keyword
@@ -114,13 +114,13 @@ After following all steps, opening `example.apigorowler.yaml` should show:
 └─────────────────────────────────────────────┘
 ```
 
-**Status bar should show**: `YAML` (not Plain Text, not apigorowler-yaml)
+**Status bar should show**: `YAML` (not Plain Text, not silky-yaml)
 
 ## What Changed to Fix Issues
 
-1. **Removed custom `apigorowler-yaml` language ID** - Was blocking YAML extension
+1. **Removed custom `silky-yaml` language ID** - Was blocking YAML extension
 2. **Added automatic language detection** - Forces files to use YAML language
-3. **Created symlink for binary** - `bin/apigorowler` points to platform binary
+3. **Created symlink for binary** - `bin/silky` points to platform binary
 4. **Fixed validation command** - Uses bundled binary instead of `go run`
 
 ## If Still Not Working
@@ -130,12 +130,12 @@ After following all steps, opening `example.apigorowler.yaml` should show:
 2. Type "Developer: Show Running Extensions"
 3. Check if these are active:
    - ✅ `redhat.vscode-yaml` (YAML extension)
-   - ✅ `noi-techpark.apigorowler-vscode` (this extension)
+   - ✅ `noi-techpark.silky-vscode` (this extension)
 
 **Check Output panel**:
 - View → Output
 - Select "Extension Host" from dropdown
-- Look for any errors mentioning "apigorowler" or "yaml"
+- Look for any errors mentioning "silky" or "yaml"
 
 **Last resort - Clean reload**:
 ```bash
@@ -149,7 +149,7 @@ After following all steps, opening `example.apigorowler.yaml` should show:
 
 ## Success Criteria Checklist
 
-- [ ] File ends with `.apigorowler.yaml`
+- [ ] File ends with `.silky.yaml`
 - [ ] Status bar shows "YAML" language
 - [ ] File has syntax highlighting (colors)
 - [ ] Three buttons (▶ ⏹ ✓) visible at top-right

@@ -1,8 +1,8 @@
-# ApiGorowler
+# Silky
 
-**ApiGorowler** is a declarative, YAML-configured API crawler designed for complex and dynamic API data extraction. It allows developers to describe multi-step API interactions with support for nested operations, data transformations, and context-based processing.
+**Silky** is a declarative, YAML-configured API crawler designed for complex and dynamic API data extraction. It allows developers to describe multi-step API interactions with support for nested operations, data transformations, and context-based processing.
 
-The core functionality of ApiGorowler revolves around three main step types:
+The core functionality of Silky revolves around three main step types:
 
 * `request`: to perform API calls,
 * `forEach`: to iterate over arrays extracted from context data,
@@ -10,7 +10,7 @@ The core functionality of ApiGorowler revolves around three main step types:
 
 Each step operates in its own **context**, allowing for precise manipulation and isolation of data. Contexts are organized in a hierarchical structure, with each `forEach` or `forValues` step creating new child contexts. This enables fine-grained control of nested operations and data scoping. After execution, results can be merged into parent or ancestor contexts using declarative **merge rules**.
 
-ApiGorowler also supports:
+Silky also supports:
 
 * Response transformation via `jq` expressions
 * Request templating with Go templates
@@ -19,7 +19,7 @@ ApiGorowler also supports:
 * Streaming of top-level entities when operating on array-based root contexts
 * Parallel execution of `forEach` iterations with configurable concurrency and rate limiting
 
-To simplify development, ApiGorowler includes a **configuration builder CLI tool**, written in Go, that enables real-time execution and inspection of the configuration. This tool helps developers debug and refine their manifests by visualizing intermediate steps.
+To simplify development, Silky includes a **configuration builder CLI tool**, written in Go, that enables real-time execution and inspection of the configuration. This tool helps developers debug and refine their manifests by visualizing intermediate steps.
 
 The library comes with a [developer IDE](cmd/ide/) which helps in building, debugging and analyze crawl configuration.
 
@@ -43,7 +43,7 @@ The library comes with a [developer IDE](cmd/ide/) which helps in building, debu
 
 ## Context System
 
-ApiGorowler's context system is the foundation of its data processing capabilities. Understanding how contexts work is essential for building effective crawl configurations.
+Silky's context system is the foundation of its data processing capabilities. Understanding how contexts work is essential for building effective crawl configurations.
 
 ### Context Hierarchy
 
@@ -57,7 +57,7 @@ When the crawler starts, it initializes a **root context** containing the initia
 
 ### Canonical vs Working Contexts
 
-ApiGorowler distinguishes between two types of contexts:
+Silky distinguishes between two types of contexts:
 
 * **Canonical contexts**: Named contexts that persist throughout execution (e.g., "root", contexts created by `forEach` with `as`, contexts created by `forValues` with `as`). These are the targets for `mergeWithContext` operations.
 * **Working contexts**: Temporary contexts created by request steps to hold response data. When a request executes within a canonical context (like "root"), it creates a working context with a `_response_` prefix internally, ensuring the canonical context remains available for merge operations.
@@ -240,7 +240,7 @@ rootContext: []
 
 ### AuthenticationStruct
 
-ApiGorowler supports multiple authentication mechanisms to handle diverse API authentication patterns.
+Silky supports multiple authentication mechanisms to handle diverse API authentication patterns.
 
 #### Common Fields
 
@@ -741,7 +741,7 @@ stopOn:
 
 ## Parallel Execution
 
-ApiGorowler supports parallel execution of `forEach` iterations, significantly improving performance for I/O-bound operations.
+Silky supports parallel execution of `forEach` iterations, significantly improving performance for I/O-bound operations.
 
 ### Configuration
 

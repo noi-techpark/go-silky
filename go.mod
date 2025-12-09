@@ -1,4 +1,4 @@
-module github.com/noi-techpark/go-apigorowler
+module github.com/noi-techpark/go-silky
 
 go 1.24.4
 

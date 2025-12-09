@@ -10,7 +10,7 @@
       "    resultTransformer: ${3:.data}",
       "    $0"
     ],
-    "description": "Basic ApiGorowler configuration with single request"
+    "description": "Basic Silky configuration with single request"
   },
   "Request Step": {
     "prefix": "agr-request",
@@ -307,7 +307,7 @@
       "rootContext: []",
       "maxConcurrency: 10",
       "headers:",
-      "  User-Agent: \"ApiGorowler/1.0\"",
+      "  User-Agent: \"Silky/1.0\"",
       "auth:",
       "  type: ${1|bearer,oauth2,basic|}",
       "  token: \"${2:your_token}\"",

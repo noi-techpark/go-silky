@@ -19,7 +19,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gdamore/tcell/v2"
-	"github.com/noi-techpark/go-apigorowler"
+	"github.com/noi-techpark/go-silky"
 	"github.com/rivo/tview"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/yaml.v3"
@@ -35,36 +35,36 @@ func escapeBrackets(input string) string {
 	).Replace(input)
 }
 
-func getEventTypeName(t apigorowler.ProfileEventType) string {
-	names := map[apigorowler.ProfileEventType]string{
-		apigorowler.EVENT_ROOT_START:            "Root Start",
-		apigorowler.EVENT_REQUEST_STEP_START:    "Request Step Start",
-		apigorowler.EVENT_REQUEST_STEP_END:      "Request Step End",
-		apigorowler.EVENT_CONTEXT_SELECTION:     "Context Selection",
-		apigorowler.EVENT_REQUEST_PAGE_START:    "Request Page Start",
-		apigorowler.EVENT_REQUEST_PAGE_END:      "Request Page End",
-		apigorowler.EVENT_PAGINATION_EVAL:       "Pagination Evaluation",
-		apigorowler.EVENT_URL_COMPOSITION:       "URL Composition",
-		apigorowler.EVENT_REQUEST_DETAILS:       "Request Details",
-		apigorowler.EVENT_REQUEST_RESPONSE:      "Request Response",
-		apigorowler.EVENT_RESPONSE_TRANSFORM:    "Response Transform",
-		apigorowler.EVENT_CONTEXT_MERGE:         "Context Merge",
-		apigorowler.EVENT_FOREACH_STEP_START:    "ForEach Step Start",
-		apigorowler.EVENT_FOREACH_STEP_END:      "ForEach Step End",
-		apigorowler.EVENT_FORVALUES_STEP_START:  "ForValues Step Start",
-		apigorowler.EVENT_FORVALUES_STEP_END:    "ForValues Step End",
-		apigorowler.EVENT_PARALLELISM_SETUP:     "Parallelism Setup",
-		apigorowler.EVENT_ITEM_SELECTION:        "Item Selection",
-		apigorowler.EVENT_AUTH_START:            "Auth Start",
-		apigorowler.EVENT_AUTH_CACHED:           "Auth Cached",
-		apigorowler.EVENT_AUTH_LOGIN_START:      "Auth Login Start",
-		apigorowler.EVENT_AUTH_LOGIN_END:        "Auth Login End",
-		apigorowler.EVENT_AUTH_TOKEN_EXTRACT:    "Token Extract",
-		apigorowler.EVENT_AUTH_TOKEN_INJECT:     "Token Inject",
-		apigorowler.EVENT_AUTH_END:              "Auth End",
-		apigorowler.EVENT_RESULT:                "Result",
-		apigorowler.EVENT_STREAM_RESULT:         "Stream Result",
-		apigorowler.EVENT_ERROR:                 "Error",
+func getEventTypeName(t silky.ProfileEventType) string {
+	names := map[silky.ProfileEventType]string{
+		silky.EVENT_ROOT_START:           "Root Start",
+		silky.EVENT_REQUEST_STEP_START:   "Request Step Start",
+		silky.EVENT_REQUEST_STEP_END:     "Request Step End",
+		silky.EVENT_CONTEXT_SELECTION:    "Context Selection",
+		silky.EVENT_REQUEST_PAGE_START:   "Request Page Start",
+		silky.EVENT_REQUEST_PAGE_END:     "Request Page End",
+		silky.EVENT_PAGINATION_EVAL:      "Pagination Evaluation",
+		silky.EVENT_URL_COMPOSITION:      "URL Composition",
+		silky.EVENT_REQUEST_DETAILS:      "Request Details",
+		silky.EVENT_REQUEST_RESPONSE:     "Request Response",
+		silky.EVENT_RESPONSE_TRANSFORM:   "Response Transform",
+		silky.EVENT_CONTEXT_MERGE:        "Context Merge",
+		silky.EVENT_FOREACH_STEP_START:   "ForEach Step Start",
+		silky.EVENT_FOREACH_STEP_END:     "ForEach Step End",
+		silky.EVENT_FORVALUES_STEP_START: "ForValues Step Start",
+		silky.EVENT_FORVALUES_STEP_END:   "ForValues Step End",
+		silky.EVENT_PARALLELISM_SETUP:    "Parallelism Setup",
+		silky.EVENT_ITEM_SELECTION:       "Item Selection",
+		silky.EVENT_AUTH_START:           "Auth Start",
+		silky.EVENT_AUTH_CACHED:          "Auth Cached",
+		silky.EVENT_AUTH_LOGIN_START:     "Auth Login Start",
+		silky.EVENT_AUTH_LOGIN_END:       "Auth Login End",
+		silky.EVENT_AUTH_TOKEN_EXTRACT:   "Token Extract",
+		silky.EVENT_AUTH_TOKEN_INJECT:    "Token Inject",
+		silky.EVENT_AUTH_END:             "Auth End",
+		silky.EVENT_RESULT:               "Result",
+		silky.EVENT_STREAM_RESULT:        "Stream Result",
+		silky.EVENT_ERROR:                "Error",
 	}
 	if name, ok := names[t]; ok {
 		return name
@@ -72,43 +72,43 @@ func getEventTypeName(t apigorowler.ProfileEventType) string {
 	return fmt.Sprintf("Unknown (%d)", t)
 }
 
-func isContainerEvent(t apigorowler.ProfileEventType) bool {
-	return t == apigorowler.EVENT_ROOT_START ||
-		t == apigorowler.EVENT_REQUEST_STEP_START ||
-		t == apigorowler.EVENT_FOREACH_STEP_START ||
-		t == apigorowler.EVENT_FORVALUES_STEP_START ||
-		t == apigorowler.EVENT_REQUEST_PAGE_START ||
-		t == apigorowler.EVENT_ITEM_SELECTION ||
-		t == apigorowler.EVENT_AUTH_START ||
-		t == apigorowler.EVENT_AUTH_LOGIN_START
+func isContainerEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_ROOT_START ||
+		t == silky.EVENT_REQUEST_STEP_START ||
+		t == silky.EVENT_FOREACH_STEP_START ||
+		t == silky.EVENT_FORVALUES_STEP_START ||
+		t == silky.EVENT_REQUEST_PAGE_START ||
+		t == silky.EVENT_ITEM_SELECTION ||
+		t == silky.EVENT_AUTH_START ||
+		t == silky.EVENT_AUTH_LOGIN_START
 }
 
-func isStartEvent(t apigorowler.ProfileEventType) bool {
-	return t == apigorowler.EVENT_ROOT_START ||
-		t == apigorowler.EVENT_REQUEST_STEP_START ||
-		t == apigorowler.EVENT_FOREACH_STEP_START ||
-		t == apigorowler.EVENT_FORVALUES_STEP_START ||
-		t == apigorowler.EVENT_REQUEST_PAGE_START ||
-		t == apigorowler.EVENT_AUTH_START ||
-		t == apigorowler.EVENT_AUTH_LOGIN_START
+func isStartEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_ROOT_START ||
+		t == silky.EVENT_REQUEST_STEP_START ||
+		t == silky.EVENT_FOREACH_STEP_START ||
+		t == silky.EVENT_FORVALUES_STEP_START ||
+		t == silky.EVENT_REQUEST_PAGE_START ||
+		t == silky.EVENT_AUTH_START ||
+		t == silky.EVENT_AUTH_LOGIN_START
 }
 
-func isEndEvent(t apigorowler.ProfileEventType) bool {
-	return t == apigorowler.EVENT_REQUEST_STEP_END ||
-		t == apigorowler.EVENT_FOREACH_STEP_END ||
-		t == apigorowler.EVENT_FORVALUES_STEP_END ||
-		t == apigorowler.EVENT_REQUEST_PAGE_END ||
-		t == apigorowler.EVENT_AUTH_END ||
-		t == apigorowler.EVENT_AUTH_LOGIN_END
+func isEndEvent(t silky.ProfileEventType) bool {
+	return t == silky.EVENT_REQUEST_STEP_END ||
+		t == silky.EVENT_FOREACH_STEP_END ||
+		t == silky.EVENT_FORVALUES_STEP_END ||
+		t == silky.EVENT_REQUEST_PAGE_END ||
+		t == silky.EVENT_AUTH_END ||
+		t == silky.EVENT_AUTH_LOGIN_END
 }
 
 // hasContextMapData returns true if the event contains context/template map data
-func hasContextMapData(data apigorowler.StepProfilerData) bool {
+func hasContextMapData(data silky.StepProfilerData) bool {
 	switch data.Type {
-	case apigorowler.EVENT_URL_COMPOSITION:
+	case silky.EVENT_URL_COMPOSITION:
 		_, ok := data.Data["goTemplateContext"]
 		return ok
-	case apigorowler.EVENT_CONTEXT_SELECTION, apigorowler.EVENT_CONTEXT_MERGE:
+	case silky.EVENT_CONTEXT_SELECTION, silky.EVENT_CONTEXT_MERGE:
 		_, ok := data.Data["fullContextMap"]
 		return ok
 	}
@@ -116,7 +116,7 @@ func hasContextMapData(data apigorowler.StepProfilerData) bool {
 }
 
 func getHelpText() string {
-	return `[yellow::b]ApiGorowler IDE - Keyboard Shortcuts[-:-:-]
+	return `[yellow::b]Silky IDE - Keyboard Shortcuts[-:-:-]
 
 [green::b]Navigation (Vim-style)[-:-:-]
   [yellow]j / ↓[-]         Move to next step in tree
@@ -230,13 +230,13 @@ type ConsoleApp struct {
 	pages          *tview.Pages
 	mainLayout     *tview.Flex
 	configFilePath string
-	profilerData   []apigorowler.StepProfilerData
+	profilerData   []silky.StepProfilerData
 	stopFn         context.CancelFunc
 	// ID-based hierarchy tracking
-	nodeMap        map[string]*tview.TreeNode
+	nodeMap map[string]*tview.TreeNode
 	// Diff view state
-	currentDiffView string // "before", "after", or "diff"
-	currentEventData apigorowler.StepProfilerData
+	currentDiffView  string // "before", "after", or "diff"
+	currentEventData silky.StepProfilerData
 }
 
 func recoverAndLog(logger ConsoleLogger) {
@@ -250,7 +250,7 @@ func NewConsoleApp() *ConsoleApp {
 	return &ConsoleApp{
 		app:          tview.NewApplication(),
 		selectedStep: 0,
-		profilerData: make([]apigorowler.StepProfilerData, 0),
+		profilerData: make([]silky.StepProfilerData, 0),
 		nodeMap:      make(map[string]*tview.TreeNode),
 	}
 }
@@ -782,15 +782,15 @@ func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 	ref := node.GetReference()
 	if ref == nil {
 		c.stepDetails.SetText("")
-		c.currentEventData = apigorowler.StepProfilerData{}
+		c.currentEventData = silky.StepProfilerData{}
 		c.updateStatusBar()
 		return
 	}
 
-	data, ok := ref.(apigorowler.StepProfilerData)
+	data, ok := ref.(silky.StepProfilerData)
 	if !ok {
 		c.stepDetails.SetText("")
-		c.currentEventData = apigorowler.StepProfilerData{}
+		c.currentEventData = silky.StepProfilerData{}
 		c.updateStatusBar()
 		return
 	}
@@ -828,43 +828,43 @@ func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 
 	// Event-specific details
 	switch data.Type {
-	case apigorowler.EVENT_ROOT_START:
+	case silky.EVENT_ROOT_START:
 		c.formatRootStart(&detailsText, data)
-	case apigorowler.EVENT_REQUEST_STEP_START, apigorowler.EVENT_FOREACH_STEP_START, apigorowler.EVENT_FORVALUES_STEP_START:
+	case silky.EVENT_REQUEST_STEP_START, silky.EVENT_FOREACH_STEP_START, silky.EVENT_FORVALUES_STEP_START:
 		c.formatStepStart(&detailsText, data)
-	case apigorowler.EVENT_CONTEXT_SELECTION:
+	case silky.EVENT_CONTEXT_SELECTION:
 		c.formatContextSelection(&detailsText, data)
-	case apigorowler.EVENT_REQUEST_PAGE_START:
+	case silky.EVENT_REQUEST_PAGE_START:
 		c.formatRequestPage(&detailsText, data)
-	case apigorowler.EVENT_PAGINATION_EVAL:
+	case silky.EVENT_PAGINATION_EVAL:
 		c.formatPaginationEval(&detailsText, data)
-	case apigorowler.EVENT_URL_COMPOSITION:
+	case silky.EVENT_URL_COMPOSITION:
 		c.formatUrlComposition(&detailsText, data)
-	case apigorowler.EVENT_REQUEST_DETAILS:
+	case silky.EVENT_REQUEST_DETAILS:
 		c.formatRequestDetails(&detailsText, data)
-	case apigorowler.EVENT_REQUEST_RESPONSE:
+	case silky.EVENT_REQUEST_RESPONSE:
 		c.formatRequestResponse(&detailsText, data)
-	case apigorowler.EVENT_RESPONSE_TRANSFORM:
+	case silky.EVENT_RESPONSE_TRANSFORM:
 		c.formatResponseTransform(&detailsText, data)
-	case apigorowler.EVENT_CONTEXT_MERGE:
+	case silky.EVENT_CONTEXT_MERGE:
 		c.formatContextMerge(&detailsText, data)
-	case apigorowler.EVENT_PARALLELISM_SETUP:
+	case silky.EVENT_PARALLELISM_SETUP:
 		c.formatParallelismSetup(&detailsText, data)
-	case apigorowler.EVENT_ITEM_SELECTION:
+	case silky.EVENT_ITEM_SELECTION:
 		c.formatItemSelection(&detailsText, data)
-	case apigorowler.EVENT_AUTH_START, apigorowler.EVENT_AUTH_END:
+	case silky.EVENT_AUTH_START, silky.EVENT_AUTH_END:
 		c.formatAuthStartEnd(&detailsText, data)
-	case apigorowler.EVENT_AUTH_CACHED:
+	case silky.EVENT_AUTH_CACHED:
 		c.formatAuthCached(&detailsText, data)
-	case apigorowler.EVENT_AUTH_LOGIN_START, apigorowler.EVENT_AUTH_LOGIN_END:
+	case silky.EVENT_AUTH_LOGIN_START, silky.EVENT_AUTH_LOGIN_END:
 		c.formatAuthLogin(&detailsText, data)
-	case apigorowler.EVENT_AUTH_TOKEN_EXTRACT:
+	case silky.EVENT_AUTH_TOKEN_EXTRACT:
 		c.formatAuthTokenExtract(&detailsText, data)
-	case apigorowler.EVENT_AUTH_TOKEN_INJECT:
+	case silky.EVENT_AUTH_TOKEN_INJECT:
 		c.formatAuthTokenInject(&detailsText, data)
-	case apigorowler.EVENT_RESULT, apigorowler.EVENT_STREAM_RESULT:
+	case silky.EVENT_RESULT, silky.EVENT_STREAM_RESULT:
 		c.formatResult(&detailsText, data)
-	case apigorowler.EVENT_ERROR:
+	case silky.EVENT_ERROR:
 		c.formatError(&detailsText, data)
 	default:
 		// Generic data display
@@ -878,7 +878,7 @@ func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 }
 
 // Event-specific formatters
-func (c *ConsoleApp) formatRootStart(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatRootStart(sb *strings.Builder, data silky.StepProfilerData) {
 	sb.WriteString("[cyan::b]Initial Context[-:-:-]\n")
 	if ctx, ok := data.Data["contextMap"]; ok {
 		jsonStr, _ := json.MarshalIndent(ctx, "", "  ")
@@ -886,7 +886,7 @@ func (c *ConsoleApp) formatRootStart(sb *strings.Builder, data apigorowler.StepP
 	}
 }
 
-func (c *ConsoleApp) formatStepStart(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatStepStart(sb *strings.Builder, data silky.StepProfilerData) {
 	sb.WriteString("[cyan::b]Step Configuration[-:-:-]\n")
 	if cfg, ok := data.Data["stepConfig"]; ok {
 		jsonStr, _ := json.MarshalIndent(cfg, "", "  ")
@@ -894,7 +894,7 @@ func (c *ConsoleApp) formatStepStart(sb *strings.Builder, data apigorowler.StepP
 	}
 }
 
-func (c *ConsoleApp) formatContextSelection(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatContextSelection(sb *strings.Builder, data silky.StepProfilerData) {
 	if path, ok := data.Data["contextPath"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Context Path:[-:-:-] %s\n\n", path))
 	}
@@ -910,13 +910,13 @@ func (c *ConsoleApp) formatContextSelection(sb *strings.Builder, data apigorowle
 	}
 }
 
-func (c *ConsoleApp) formatRequestPage(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatRequestPage(sb *strings.Builder, data silky.StepProfilerData) {
 	if pageNum, ok := data.Data["pageNumber"]; ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Page Number:[-:-:-] %v\n", pageNum))
 	}
 }
 
-func (c *ConsoleApp) formatPaginationEval(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatPaginationEval(sb *strings.Builder, data silky.StepProfilerData) {
 	sb.WriteString("[cyan::b]Pagination State[-:-:-]\n\n")
 
 	if prevState, ok := data.Data["previousState"].(map[string]any); ok {
@@ -932,7 +932,7 @@ func (c *ConsoleApp) formatPaginationEval(sb *strings.Builder, data apigorowler.
 	}
 }
 
-func (c *ConsoleApp) formatUrlComposition(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatUrlComposition(sb *strings.Builder, data silky.StepProfilerData) {
 	if template, ok := data.Data["urlTemplate"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]URL Template:[-:-:-]\n%s\n\n", template))
 	}
@@ -946,7 +946,7 @@ func (c *ConsoleApp) formatUrlComposition(sb *strings.Builder, data apigorowler.
 	}
 }
 
-func (c *ConsoleApp) formatRequestDetails(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatRequestDetails(sb *strings.Builder, data silky.StepProfilerData) {
 	if curl, ok := data.Data["curl"].(string); ok {
 		sb.WriteString("[cyan::b]cURL Command:[-:-:-]\n")
 		sb.WriteString(fmt.Sprintf("[#888888]%s[-]\n\n", escapeBrackets(curl)))
@@ -966,7 +966,7 @@ func (c *ConsoleApp) formatRequestDetails(sb *strings.Builder, data apigorowler.
 	}
 }
 
-func (c *ConsoleApp) formatRequestResponse(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatRequestResponse(sb *strings.Builder, data silky.StepProfilerData) {
 	if status, ok := data.Data["statusCode"]; ok {
 		var statusCode int
 		switch v := status.(type) {
@@ -1001,7 +1001,7 @@ func (c *ConsoleApp) formatRequestResponse(sb *strings.Builder, data apigorowler
 	}
 }
 
-func (c *ConsoleApp) formatResponseTransform(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatResponseTransform(sb *strings.Builder, data silky.StepProfilerData) {
 	if rule, ok := data.Data["transformRule"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Transform Rule:[-:-:-]\n[yellow]%s[-]\n\n", rule))
 	}
@@ -1056,7 +1056,7 @@ func (c *ConsoleApp) formatResponseTransform(sb *strings.Builder, data apigorowl
 	}
 }
 
-func (c *ConsoleApp) formatContextMerge(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatContextMerge(sb *strings.Builder, data silky.StepProfilerData) {
 	if rule, ok := data.Data["mergeRule"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Merge Rule:[-:-:-]\n[yellow]%s[-]\n\n", rule))
 	}
@@ -1123,7 +1123,7 @@ func (c *ConsoleApp) formatContextMerge(sb *strings.Builder, data apigorowler.St
 	}
 }
 
-func (c *ConsoleApp) formatParallelismSetup(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatParallelismSetup(sb *strings.Builder, data silky.StepProfilerData) {
 	if workers, ok := data.Data["maxConcurrency"]; ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Max Concurrency:[-:-:-] %v\n", workers))
 	}
@@ -1138,7 +1138,7 @@ func (c *ConsoleApp) formatParallelismSetup(sb *strings.Builder, data apigorowle
 	}
 }
 
-func (c *ConsoleApp) formatItemSelection(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatItemSelection(sb *strings.Builder, data silky.StepProfilerData) {
 	if idx, ok := data.Data["iterationIndex"]; ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Iteration Index:[-:-:-] %v\n\n", idx))
 	}
@@ -1150,7 +1150,7 @@ func (c *ConsoleApp) formatItemSelection(sb *strings.Builder, data apigorowler.S
 	}
 }
 
-func (c *ConsoleApp) formatResult(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatResult(sb *strings.Builder, data silky.StepProfilerData) {
 	var result interface{}
 	if r, ok := data.Data["result"]; ok {
 		result = r
@@ -1168,7 +1168,7 @@ func (c *ConsoleApp) formatResult(sb *strings.Builder, data apigorowler.StepProf
 	}
 }
 
-func (c *ConsoleApp) formatAuthStartEnd(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatAuthStartEnd(sb *strings.Builder, data silky.StepProfilerData) {
 	if authType, ok := data.Data["authType"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Authentication Type:[-:-:-] %s\n\n", authType))
 	}
@@ -1184,7 +1184,7 @@ func (c *ConsoleApp) formatAuthStartEnd(sb *strings.Builder, data apigorowler.St
 	}
 }
 
-func (c *ConsoleApp) formatAuthCached(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatAuthCached(sb *strings.Builder, data silky.StepProfilerData) {
 	sb.WriteString("[green::b]Using cached credentials[-:-:-]\n\n")
 
 	if age, ok := data.Data["age"].(string); ok {
@@ -1204,7 +1204,7 @@ func (c *ConsoleApp) formatAuthCached(sb *strings.Builder, data apigorowler.Step
 	}
 }
 
-func (c *ConsoleApp) formatAuthLogin(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatAuthLogin(sb *strings.Builder, data silky.StepProfilerData) {
 	if url, ok := data.Data["url"].(string); ok {
 		if method, ok := data.Data["method"].(string); ok {
 			sb.WriteString(fmt.Sprintf("[cyan::b]Login URL:[-:-:-] %s %s\n\n", method, escapeBrackets(url)))
@@ -1250,7 +1250,7 @@ func (c *ConsoleApp) formatAuthLogin(sb *strings.Builder, data apigorowler.StepP
 	}
 }
 
-func (c *ConsoleApp) formatAuthTokenExtract(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatAuthTokenExtract(sb *strings.Builder, data silky.StepProfilerData) {
 	if extractFrom, ok := data.Data["extractFrom"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Extract From:[-:-:-] %s\n", extractFrom))
 	} else if selector, ok := data.Data["extractSelector"].(string); ok {
@@ -1278,7 +1278,7 @@ func (c *ConsoleApp) formatAuthTokenExtract(sb *strings.Builder, data apigorowle
 	}
 }
 
-func (c *ConsoleApp) formatAuthTokenInject(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatAuthTokenInject(sb *strings.Builder, data silky.StepProfilerData) {
 	if location, ok := data.Data["location"].(string); ok {
 		sb.WriteString(fmt.Sprintf("[cyan::b]Injection Location:[-:-:-] %s\n", location))
 	}
@@ -1308,7 +1308,7 @@ func (c *ConsoleApp) formatAuthTokenInject(sb *strings.Builder, data apigorowler
 	}
 }
 
-func (c *ConsoleApp) formatError(sb *strings.Builder, data apigorowler.StepProfilerData) {
+func (c *ConsoleApp) formatError(sb *strings.Builder, data silky.StepProfilerData) {
 	// Try multiple keys for error message
 	var errorMsg string
 	if err, ok := data.Data["error"].(string); ok {
@@ -1363,7 +1363,7 @@ func (c *ConsoleApp) appendLog(log string) {
 }
 
 func (c *ConsoleApp) setupCrawlJob() {
-	c.profilerData = make([]apigorowler.StepProfilerData, 0)
+	c.profilerData = make([]silky.StepProfilerData, 0)
 	c.nodeMap = make(map[string]*tview.TreeNode)
 	if c.stopFn != nil {
 		c.stopFn()
@@ -1380,7 +1380,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 		// accumulator for stream data
 		streamedData := make([]interface{}, 0)
 
-		craw, _, _ := apigorowler.NewApiCrawler(c.configFilePath)
+		craw, _, _ := silky.NewApiCrawler(c.configFilePath)
 		craw.SetLogger(logger)
 		profiler := craw.EnableProfiler()
 		defer close(profiler)
@@ -1499,14 +1499,14 @@ func (c *ConsoleApp) onConfigFileChanged() {
 		return
 	}
 
-	var cfg apigorowler.Config
+	var cfg silky.Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
 		c.appendLog("[red]" + escapeBrackets(err.Error()))
 		return
 	}
 
-	errors := apigorowler.ValidateConfig(cfg)
+	errors := silky.ValidateConfig(cfg)
 	if len(errors) != 0 {
 		text := "[red]"
 		for _, r := range errors {
@@ -1560,7 +1560,7 @@ func (c *ConsoleApp) dumpStepsToLog() {
 	traverse = func(node *tview.TreeNode, depth int) {
 		// Only process nodes with data references
 		if ref := node.GetReference(); ref != nil {
-			if step, ok := ref.(apigorowler.StepProfilerData); ok {
+			if step, ok := ref.(silky.StepProfilerData); ok {
 				// Apply indentation
 				prefix := strings.Repeat("__", depth)
 				prefixedName := prefix + step.Name

@@ -2,14 +2,14 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package apigorowler
+package silky
 
 import (
 	"context"
 	"net/http"
 	"testing"
 
-	crawler_testing "github.com/noi-techpark/go-apigorowler/testing"
+	crawler_testing "github.com/noi-techpark/go-silky/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -562,7 +562,7 @@ func TestAuthBearer(t *testing.T) {
 
 func TestAuthOAuthPassword(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://oauth.example.com/token":     "testdata/crawler/auth_oauth_password/token_response.json",
+		"https://oauth.example.com/token":    "testdata/crawler/auth_oauth_password/token_response.json",
 		"https://api.example.com/me/profile": "testdata/crawler/auth_oauth_password/profile_response.json",
 	})
 
@@ -630,7 +630,7 @@ func TestAuthCookie(t *testing.T) {
 
 func TestAuthJWTBody(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/v1/auth/login":      "testdata/crawler/auth_jwt_body/login_response.json",
+		"https://api.example.com/v1/auth/login":     "testdata/crawler/auth_jwt_body/login_response.json",
 		"https://api.example.com/v1/protected/data": "testdata/crawler/auth_jwt_body/protected_response.json",
 	})
 
@@ -705,8 +705,8 @@ func TestAuthCustomCookieToHeader(t *testing.T) {
 
 func TestAuthCustomBodyToQuery(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.provider.com/v1/authenticate":         "testdata/crawler/auth_custom_body_to_query/authenticate_response.json",
-		"https://api.provider.com/v1/sensors?api_key=ak_live_1234567890abcdef": "testdata/crawler/auth_custom_body_to_query/sensors_response.json",
+		"https://api.provider.com/v1/authenticate":                                        "testdata/crawler/auth_custom_body_to_query/authenticate_response.json",
+		"https://api.provider.com/v1/sensors?api_key=ak_live_1234567890abcdef":            "testdata/crawler/auth_custom_body_to_query/sensors_response.json",
 		"https://api.provider.com/v1/sensors/1/readings?api_key=ak_live_1234567890abcdef": "testdata/crawler/auth_custom_body_to_query/readings_response.json",
 		"https://api.provider.com/v1/sensors/2/readings?api_key=ak_live_1234567890abcdef": "testdata/crawler/auth_custom_body_to_query/readings_response.json",
 	})
@@ -726,7 +726,7 @@ func TestAuthCustomBodyToQuery(t *testing.T) {
 
 func TestAuthMixedOverride(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/public/stats":    "testdata/crawler/auth_mixed_override/stats_response.json",
+		"https://api.example.com/public/stats":       "testdata/crawler/auth_mixed_override/stats_response.json",
 		"https://admin.example.com/internal/reports": "testdata/crawler/auth_mixed_override/reports_response.json",
 	})
 
@@ -748,8 +748,8 @@ func TestAuthMixedOverride(t *testing.T) {
 
 func TestForValuesContextPreservation(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.store.com/v1/categories?type=electronics": "testdata/crawler/request_as_context_disconnect/categories_response.json",
-		"https://api.store.com/v1/categories?type=clothing":    "testdata/crawler/request_as_context_disconnect/categories_clothing_response.json",
+		"https://api.store.com/v1/categories?type=electronics":                 "testdata/crawler/request_as_context_disconnect/categories_response.json",
+		"https://api.store.com/v1/categories?type=clothing":                    "testdata/crawler/request_as_context_disconnect/categories_clothing_response.json",
 		"https://api.store.com/v1/products?type=electronics&categoryId=cat-e1": "testdata/crawler/request_as_context_disconnect/products_response.json",
 		"https://api.store.com/v1/products?type=electronics&categoryId=cat-e2": "testdata/crawler/request_as_context_disconnect/products_response.json",
 		"https://api.store.com/v1/products?type=clothing&categoryId=cat-c1":    "testdata/crawler/request_as_context_disconnect/products_response.json",
@@ -784,16 +784,16 @@ func TestForValuesContextPreservation(t *testing.T) {
 
 func TestForValuesDynamicKeys(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.locations.com/v1/locations?lang=en": "testdata/crawler/request_as_dynamic_keys/locations_en_response.json",
-		"https://api.locations.com/v1/locations?lang=de": "testdata/crawler/request_as_dynamic_keys/locations_de_response.json",
-		"https://api.locations.com/v1/locations?lang=it": "testdata/crawler/request_as_dynamic_keys/locations_it_response.json",
+		"https://api.locations.com/v1/locations?lang=en":                 "testdata/crawler/request_as_dynamic_keys/locations_en_response.json",
+		"https://api.locations.com/v1/locations?lang=de":                 "testdata/crawler/request_as_dynamic_keys/locations_de_response.json",
+		"https://api.locations.com/v1/locations?lang=it":                 "testdata/crawler/request_as_dynamic_keys/locations_it_response.json",
 		"https://api.locations.com/v1/stations?lang=en&locationId=loc-1": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
 		"https://api.locations.com/v1/stations?lang=en&locationId=loc-2": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
 		"https://api.locations.com/v1/stations?lang=de&locationId=loc-1": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
 		"https://api.locations.com/v1/stations?lang=de&locationId=loc-2": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
 		"https://api.locations.com/v1/stations?lang=it&locationId=loc-1": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
 		"https://api.locations.com/v1/stations?lang=it&locationId=loc-2": "testdata/crawler/request_as_dynamic_keys/stations_response.json",
-		"https://api.locations.com/v1/users/me/preferences": "testdata/crawler/request_as_dynamic_keys/preferences_response.json",
+		"https://api.locations.com/v1/users/me/preferences":              "testdata/crawler/request_as_dynamic_keys/preferences_response.json",
 	})
 
 	craw, _, err := NewApiCrawler("testdata/crawler/request_as_dynamic_keys.yaml")
@@ -966,10 +966,10 @@ func TestEdgeCaseMultipleForValues(t *testing.T) {
 	// Tests that multiple forValues iterations can all merge to canonical root
 	// without context shadowing issues
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/data?region=us&tier=free":     "testdata/crawler/edge_case_multiple_forvalues/response.json",
-		"https://api.example.com/data?region=us&tier=premium":  "testdata/crawler/edge_case_multiple_forvalues/response.json",
-		"https://api.example.com/data?region=eu&tier=free":     "testdata/crawler/edge_case_multiple_forvalues/response.json",
-		"https://api.example.com/data?region=eu&tier=premium":  "testdata/crawler/edge_case_multiple_forvalues/response.json",
+		"https://api.example.com/data?region=us&tier=free":    "testdata/crawler/edge_case_multiple_forvalues/response.json",
+		"https://api.example.com/data?region=us&tier=premium": "testdata/crawler/edge_case_multiple_forvalues/response.json",
+		"https://api.example.com/data?region=eu&tier=free":    "testdata/crawler/edge_case_multiple_forvalues/response.json",
+		"https://api.example.com/data?region=eu&tier=premium": "testdata/crawler/edge_case_multiple_forvalues/response.json",
 	})
 
 	craw, validationErrors, err := NewApiCrawler("testdata/crawler/edge_case_multiple_forvalues.yaml")

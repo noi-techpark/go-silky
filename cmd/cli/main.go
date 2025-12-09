@@ -13,7 +13,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/noi-techpark/go-apigorowler"
+	"github.com/noi-techpark/go-silky"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	}
 
 	// Create crawler (this also validates)
-	crawler, validationErrs, err := apigorowler.NewApiCrawler(*configPath)
+	crawler, validationErrs, err := silky.NewApiCrawler(*configPath)
 
 	// Check validation errors first (these have detailed messages)
 	if len(validationErrs) > 0 {
@@ -53,7 +53,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Enable profiler if requested
-	var profilerChan chan apigorowler.StepProfilerData
+	var profilerChan chan silky.StepProfilerData
 	if *profilerFlag {
 		profilerChan = crawler.EnableProfiler()
 		wg.Add(1)

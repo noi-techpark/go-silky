@@ -1,6 +1,6 @@
-# Go-Apigorowler IDE
+# Silky IDE
 
-The Go-Apigorowler IDE provides an interactive environment to develop and test ApiGorowler YAML configurations.
+The Silky IDE provides an interactive environment to develop and test Silky YAML configurations.
 
 ![ide](../../assets/ide_showcase.gif)
 
@@ -31,5 +31,5 @@ The Go-Apigorowler IDE provides an interactive environment to develop and test A
 
 ## Summary
 
-The Go-Apigorowler IDE streamlines configuration development by providing real-time execution feedback, detailed inspection of intermediate states, and convenient output dumping — all aimed at making your ApiGorowler crawling configurations easier to build, debug, and optimize.
+The Silky IDE streamlines configuration development by providing real-time execution feedback, detailed inspection of intermediate states, and convenient output dumping — all aimed at making your Silky crawling configurations easier to build, debug, and optimize.
 

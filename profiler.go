@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package apigorowler
+package silky
 
 import (
 	"fmt"
@@ -251,15 +251,15 @@ func (p *Profiler) EmitRequestPageEnd(pageID string, stepID string, step Step, p
 
 // URLCompositionData holds data for URL composition event
 type URLCompositionData struct {
-	URLTemplate       string
-	PageNumber        int
-	QueryParams       map[string]string
-	BodyParams        map[string]interface{}
-	NextPageURL       string
-	TemplateContext   map[string]any
-	ResultURL         string
-	ResultHeaders     map[string]string
-	ResultBody        interface{}
+	URLTemplate     string
+	PageNumber      int
+	QueryParams     map[string]string
+	BodyParams      map[string]interface{}
+	NextPageURL     string
+	TemplateContext map[string]any
+	ResultURL       string
+	ResultHeaders   map[string]string
+	ResultBody      interface{}
 }
 
 // EmitURLComposition emits URL composition event
@@ -765,4 +765,3 @@ func copyDataSafe(v interface{}) interface{} {
 		return v
 	}
 }
-

@@ -14,8 +14,8 @@ export class CrawlerRunner {
         private timelineProvider: TimelineViewProvider,
         private context: vscode.ExtensionContext
     ) {
-        this.outputChannel = vscode.window.createOutputChannel('ApiGorowler');
-        this.diagnosticCollection = vscode.languages.createDiagnosticCollection('apigorowler');
+        this.outputChannel = vscode.window.createOutputChannel('Silky');
+        this.diagnosticCollection = vscode.languages.createDiagnosticCollection('silky');
         this.context.subscriptions.push(this.outputChannel);
         this.context.subscriptions.push(this.diagnosticCollection);
     }
@@ -27,21 +27,21 @@ export class CrawlerRunner {
         this.outputChannel.clear();
         this.outputChannel.show(true);
 
-        const config = vscode.workspace.getConfiguration('apigorowler');
+        const config = vscode.workspace.getConfiguration('silky');
         const goPath = config.get<string>('executable.path') || 'go';
         const maxOutputSize = config.get<number>('maxOutputSize') || 10000;
 
         // Find the Go module root (where cmd/ide is located)
         const idePath = await this.findIdePath(configPath);
 
-        this.outputChannel.appendLine(`Running ApiGorowler on: ${configPath}`);
+        this.outputChannel.appendLine(`Running Silky on: ${configPath}`);
         this.outputChannel.appendLine(`Using Go executable: ${goPath}`);
         this.outputChannel.appendLine('---');
 
         try {
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: 'Running ApiGorowler',
+                title: 'Running Silky',
                 cancellable: true
             }, async (_progress, token) => {
                 token.onCancellationRequested(() => {
@@ -58,7 +58,7 @@ export class CrawlerRunner {
 
                     if (usingBundled) {
                         // Using bundled binary
-                        const binaryPath = path.join(idePath, 'apigorowler');
+                        const binaryPath = path.join(idePath, 'silky');
                         command = binaryPath;
                         args = ['-config', configPath, '-profiler'];
                         cwd = path.dirname(configPath);
@@ -135,19 +135,19 @@ export class CrawlerRunner {
                         if (code === 0) {
                             this.outputChannel.appendLine('---');
                             this.outputChannel.appendLine('Execution completed successfully');
-                            vscode.window.showInformationMessage('ApiGorowler execution completed');
+                            vscode.window.showInformationMessage('Silky execution completed');
 
                             // Focus timeline at the end
-                            vscode.commands.executeCommand('apigorowler.timeline.focus');
+                            vscode.commands.executeCommand('silky.timeline.focus');
 
                             resolve();
                         } else {
                             this.outputChannel.appendLine('---');
                             this.outputChannel.appendLine(`Execution failed with code ${code}`);
-                            vscode.window.showErrorMessage(`ApiGorowler execution failed with code ${code}`);
+                            vscode.window.showErrorMessage(`Silky execution failed with code ${code}`);
 
                             // Focus timeline even on failure
-                            vscode.commands.executeCommand('apigorowler.timeline.focus');
+                            vscode.commands.executeCommand('silky.timeline.focus');
 
                             reject(new Error(`Process exited with code ${code}`));
                         }
@@ -163,7 +163,7 @@ export class CrawlerRunner {
 
     async debug(configPath: string): Promise<void> {
         // Debug mode runs with profiler enabled and shows more detailed output
-        this.outputChannel.appendLine(`Debugging ApiGorowler on: ${configPath}`);
+        this.outputChannel.appendLine(`Debugging Silky on: ${configPath}`);
         this.outputChannel.appendLine('Debug mode: Profiler enabled, verbose output');
         this.outputChannel.appendLine('---');
 
@@ -175,7 +175,7 @@ export class CrawlerRunner {
         this.outputChannel.show(true);
         this.diagnosticCollection.clear();
 
-        const config = vscode.workspace.getConfiguration('apigorowler');
+        const config = vscode.workspace.getConfiguration('silky');
         const goPath = config.get<string>('executable.path') || 'go';
 
         const idePath = await this.findIdePath(configPath);
@@ -193,7 +193,7 @@ export class CrawlerRunner {
 
                 if (usingBundled) {
                     // Using bundled binary
-                    const binaryPath = path.join(idePath, 'apigorowler');
+                    const binaryPath = path.join(idePath, 'silky');
                     command = binaryPath;
                     args = ['-config', configPath, '-validate'];
                     cwd = path.dirname(configPath);
@@ -234,7 +234,7 @@ export class CrawlerRunner {
             this.outputChannel.appendLine('Execution stopped by user');
 
             // Focus timeline when stopped
-            vscode.commands.executeCommand('apigorowler.timeline.focus');
+            vscode.commands.executeCommand('silky.timeline.focus');
         }
     }
 
@@ -319,7 +319,7 @@ export class CrawlerRunner {
                 vscode.DiagnosticSeverity.Error
             );
 
-            diagnostic.source = 'ApiGorowler';
+            diagnostic.source = 'Silky';
             diagnostics.push(diagnostic);
         }
 
@@ -331,7 +331,7 @@ export class CrawlerRunner {
                 errorMessage.trim(),
                 vscode.DiagnosticSeverity.Error
             );
-            diagnostic.source = 'ApiGorowler';
+            diagnostic.source = 'Silky';
             diagnostics.push(diagnostic);
         }
 
@@ -420,7 +420,7 @@ export class CrawlerRunner {
         const fs = require('fs').promises;
 
         // Strategy 1: Check if bundled binary exists
-        const bundledBinary = path.join(this.context.extensionPath, 'bin', 'apigorowler');
+        const bundledBinary = path.join(this.context.extensionPath, 'bin', 'silky');
         try {
             await fs.access(bundledBinary);
             this.outputChannel.appendLine(`Using bundled binary: ${bundledBinary}`);
@@ -475,7 +475,7 @@ export class CrawlerRunner {
 
         // Strategy 5: Ask user to locate it
         const action = await vscode.window.showErrorMessage(
-            'Could not find cmd/ide folder or bundled binary. Please select the go-apigorowler project folder.',
+            'Could not find cmd/ide folder or bundled binary. Please select the go-silky project folder.',
             'Browse...',
             'Cancel'
         );
@@ -485,7 +485,7 @@ export class CrawlerRunner {
                 canSelectFiles: false,
                 canSelectFolders: true,
                 canSelectMany: false,
-                title: 'Select go-apigorowler project folder'
+                title: 'Select go-silky project folder'
             });
 
             if (selected && selected[0]) {
@@ -493,7 +493,7 @@ export class CrawlerRunner {
                 try {
                     await fs.access(idePath);
                     // Save for future use
-                    const config = vscode.workspace.getConfiguration('apigorowler');
+                    const config = vscode.workspace.getConfiguration('silky');
                     await config.update('projectPath', selected[0].fsPath, vscode.ConfigurationTarget.Workspace);
                     return idePath;
                 } catch {
@@ -502,6 +502,6 @@ export class CrawlerRunner {
             }
         }
 
-        throw new Error('Could not find cmd/ide folder. Please open the go-apigorowler project folder in VSCode.');
+        throw new Error('Could not find cmd/ide folder. Please open the go-silky project folder in VSCode.');
     }
 }

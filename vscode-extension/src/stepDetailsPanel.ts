@@ -45,7 +45,7 @@ export class StepDetailsPanel {
 
         // Otherwise, create a new panel
         const panel = vscode.window.createWebviewPanel(
-            'apigorowlerStepDetails',
+            'silkyStepDetails',
             'Step Details',
             column,
             {

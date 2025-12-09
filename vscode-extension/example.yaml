@@ -1,6 +1,6 @@
-# Example ApiGorowler Configuration
+# Example Silky Configuration
 # This file demonstrates basic features
-# Open this in VSCode with the ApiGorowler extension to see:
+# Open this in VSCode with the Silky extension to see:
 # - Syntax highlighting
 # - Schema validation
 # - IntelliSense (Ctrl+Space)
@@ -9,7 +9,7 @@ rootContext: []
 
 # Global headers applied to all requests
 headers:
-  User-Agent: "ApiGorowler Example/1.0"
+  User-Agent: "Silky Example/1.0"
 
 steps:
   # Simple request step
@@ -35,6 +35,6 @@ steps:
 
 # To run this example:
 # 1. Click the ▶ Run button in the editor title bar
-# 2. View execution in the ApiGorowler sidebar
+# 2. View execution in the Silky sidebar
 # 3. Click any step to inspect data
 # 4. Check Output panel for detailed logs

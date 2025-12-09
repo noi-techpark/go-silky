@@ -10,14 +10,14 @@ let stepsTreeProvider: StepsTreeProvider | undefined;
 let timelineViewProvider: TimelineViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('ApiGorowler extension is now active');
+    console.log('Silky extension is now active');
 
     // Configure YAML extension to recognize our files
     configureYamlExtension(context);
 
     // Initialize tree provider
     stepsTreeProvider = new StepsTreeProvider();
-    const stepsTreeView = vscode.window.createTreeView('apigorowler.stepsExplorer', {
+    const stepsTreeView = vscode.window.createTreeView('silky.stepsExplorer', {
         treeDataProvider: stepsTreeProvider,
         showCollapseAll: true
     });
@@ -25,7 +25,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(stepsTreeView);
 
     // Create output channel for timeline debugging
-    const timelineOutputChannel = vscode.window.createOutputChannel('ApiGorowler Timeline');
+    const timelineOutputChannel = vscode.window.createOutputChannel('Silky Timeline');
     context.subscriptions.push(timelineOutputChannel);
 
     // Register timeline webview view provider BEFORE crawler runner
@@ -40,44 +40,44 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize crawler runner
     crawlerRunner = new CrawlerRunner(stepsTreeProvider, timelineViewProvider, context);
 
-    // Helper to find and focus an ApiGorowler file
-    let lastApiGorowlerFile: vscode.Uri | undefined;
-    const getApiGorowlerDocument = async (): Promise<vscode.TextDocument | undefined> => {
+    // Helper to find and focus a Silky file
+    let lastSilkyFile: vscode.Uri | undefined;
+    const getSilkyDocument = async (): Promise<vscode.TextDocument | undefined> => {
         // Try active editor first
         let editor = vscode.window.activeTextEditor;
-        if (editor && isApiGorowlerFile(editor.document)) {
-            lastApiGorowlerFile = editor.document.uri;
+        if (editor && isSilkyFile(editor.document)) {
+            lastSilkyFile = editor.document.uri;
             return editor.document;
         }
 
-        // Try to find an open ApiGorowler file in visible editors
+        // Try to find an open Silky file in visible editors
         for (const visibleEditor of vscode.window.visibleTextEditors) {
-            if (isApiGorowlerFile(visibleEditor.document)) {
+            if (isSilkyFile(visibleEditor.document)) {
                 await vscode.window.showTextDocument(visibleEditor.document, { preview: false, preserveFocus: false });
-                lastApiGorowlerFile = visibleEditor.document.uri;
+                lastSilkyFile = visibleEditor.document.uri;
                 return visibleEditor.document;
             }
         }
 
-        // Try to refocus the last used ApiGorowler file
-        if (lastApiGorowlerFile) {
+        // Try to refocus the last used Silky file
+        if (lastSilkyFile) {
             try {
-                const document = await vscode.workspace.openTextDocument(lastApiGorowlerFile);
-                if (isApiGorowlerFile(document)) {
+                const document = await vscode.workspace.openTextDocument(lastSilkyFile);
+                if (isSilkyFile(document)) {
                     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
                     return document;
                 }
             } catch (e) {
                 // File might have been closed or deleted
-                lastApiGorowlerFile = undefined;
+                lastSilkyFile = undefined;
             }
         }
 
-        // Try to find any open ApiGorowler file in all tabs
+        // Try to find any open Silky file in all tabs
         for (const document of vscode.workspace.textDocuments) {
-            if (isApiGorowlerFile(document)) {
+            if (isSilkyFile(document)) {
                 await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
-                lastApiGorowlerFile = document.uri;
+                lastSilkyFile = document.uri;
                 return document;
             }
         }
@@ -87,10 +87,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.run', async () => {
-            const document = await getApiGorowlerDocument();
+        vscode.commands.registerCommand('silky.run', async () => {
+            const document = await getSilkyDocument();
             if (!document) {
-                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
+                vscode.window.showWarningMessage('No Silky configuration file found. Please open an .silky.yaml file.');
                 return;
             }
 
@@ -100,16 +100,16 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.stop', () => {
+        vscode.commands.registerCommand('silky.stop', () => {
             crawlerRunner?.stop();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.debug', async () => {
-            const document = await getApiGorowlerDocument();
+        vscode.commands.registerCommand('silky.debug', async () => {
+            const document = await getSilkyDocument();
             if (!document) {
-                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
+                vscode.window.showWarningMessage('No Silky configuration file found. Please open an .silky.yaml file.');
                 return;
             }
 
@@ -119,10 +119,10 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.validateConfig', async () => {
-            const document = await getApiGorowlerDocument();
+        vscode.commands.registerCommand('silky.validateConfig', async () => {
+            const document = await getSilkyDocument();
             if (!document) {
-                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
+                vscode.window.showWarningMessage('No Silky configuration file found. Please open an .silky.yaml file.');
                 return;
             }
 
@@ -131,7 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.exportSteps', async () => {
+        vscode.commands.registerCommand('silky.exportSteps', async () => {
             if (!stepsTreeProvider?.hasSteps()) {
                 vscode.window.showWarningMessage('No execution steps to export');
                 return;
@@ -150,19 +150,19 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.collapseAllSteps', () => {
-            vscode.commands.executeCommand('workbench.actions.treeView.apigorowler.stepsExplorer.collapseAll');
+        vscode.commands.registerCommand('silky.collapseAllSteps', () => {
+            vscode.commands.executeCommand('workbench.actions.treeView.silky.stepsExplorer.collapseAll');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.refreshSteps', () => {
+        vscode.commands.registerCommand('silky.refreshSteps', () => {
             stepsTreeProvider?.refresh();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.showStepDetails', (step: StepTreeItem) => {
+        vscode.commands.registerCommand('silky.showStepDetails', (step: StepTreeItem) => {
             if (step && step.data) {
                 StepDetailsPanel.createOrShow(context.extensionUri, step.data);
             }
@@ -170,7 +170,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.toggleStepDetails', (step: StepTreeItem) => {
+        vscode.commands.registerCommand('silky.toggleStepDetails', (step: StepTreeItem) => {
             if (step && step.data) {
                 StepDetailsPanel.createOrShow(context.extensionUri, step.data);
             }
@@ -178,7 +178,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.selectStepFromTimeline', async (eventId: string) => {
+        vscode.commands.registerCommand('silky.selectStepFromTimeline', async (eventId: string) => {
             console.log('[selectStepFromTimeline] Received eventId:', eventId);
 
             try {
@@ -189,9 +189,9 @@ export function activate(context: vscode.ExtensionContext) {
                     console.log('[selectStepFromTimeline] Step data.id:', step?.data.id);
 
                     if (step) {
-                        // First focus the ApiGorowler activity bar to make the tree visible
+                        // First focus the Silky activity bar to make the tree visible
                         console.log('[selectStepFromTimeline] Focusing steps explorer...');
-                        await vscode.commands.executeCommand('apigorowler.stepsExplorer.focus');
+                        await vscode.commands.executeCommand('silky.stepsExplorer.focus');
                         console.log('[selectStepFromTimeline] Focus complete');
 
                         // Reveal and select the step in the tree with maximum visibility
@@ -214,7 +214,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                         // Trigger the same command that clicking the tree item would trigger
                         console.log('[selectStepFromTimeline] Executing toggleStepDetails...');
-                        await vscode.commands.executeCommand('apigorowler.toggleStepDetails', step);
+                        await vscode.commands.executeCommand('silky.toggleStepDetails', step);
                         console.log('[selectStepFromTimeline] Complete!');
                     } else {
                         vscode.window.showErrorMessage(`Step with ID ${eventId} not found in tree`);
@@ -239,7 +239,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.convertToApiGorowlerYaml', async () => {
+        vscode.commands.registerCommand('silky.convertToSilkyYaml', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage('No active editor');
@@ -249,36 +249,36 @@ export function activate(context: vscode.ExtensionContext) {
             const document = editor.document;
             const oldUri = document.uri;
 
-            // Check if already an apigorowler file
-            if (isApiGorowlerFile(document)) {
-                vscode.window.showInformationMessage('File is already an ApiGorowler YAML file');
+            // Check if already an silky file
+            if (isSilkyFile(document)) {
+                vscode.window.showInformationMessage('File is already a Silky YAML file');
                 return;
             }
 
             // Create new filename
             const oldPath = oldUri.fsPath;
-            const newPath = oldPath.replace(/\.ya?ml$/, '.apigorowler.yaml');
+            const newPath = oldPath.replace(/\.ya?ml$/, '.silky.yaml');
 
             if (oldPath === newPath) {
                 // Doesn't have .yaml or .yml extension
-                const newPathWithExt = oldPath + '.apigorowler.yaml';
+                const newPathWithExt = oldPath + '.silky.yaml';
                 const newUri = vscode.Uri.file(newPathWithExt);
 
                 await vscode.workspace.fs.rename(oldUri, newUri);
                 await vscode.window.showTextDocument(newUri);
-                vscode.window.showInformationMessage('File renamed to ApiGorowler YAML format');
+                vscode.window.showInformationMessage('File renamed to Silky YAML format');
             } else {
                 const newUri = vscode.Uri.file(newPath);
 
                 await vscode.workspace.fs.rename(oldUri, newUri);
                 await vscode.window.showTextDocument(newUri);
-                vscode.window.showInformationMessage('File converted to ApiGorowler YAML format');
+                vscode.window.showInformationMessage('File converted to Silky YAML format');
             }
         })
     );
 
-    // Detect potential ApiGorowler files and suggest conversion
-    // Also force YAML language for .apigorowler.yaml files
+    // Detect potential Silky files and suggest conversion
+    // Also force YAML language for .silky.yaml files
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async (editor) => {
             if (!editor) {
@@ -287,14 +287,14 @@ export function activate(context: vscode.ExtensionContext) {
 
             const document = editor.document;
 
-            // If it's an apigorowler file but not recognized as YAML, set it
-            if (isApiGorowlerFile(document) && document.languageId !== 'yaml') {
+            // If it's an silky file but not recognized as YAML, set it
+            if (isSilkyFile(document) && document.languageId !== 'yaml') {
                 await vscode.languages.setTextDocumentLanguage(document, 'yaml');
                 return;
             }
 
-            // Skip if already an apigorowler file
-            if (isApiGorowlerFile(document)) {
+            // Skip if already an silky file
+            if (isSilkyFile(document)) {
                 return;
             }
 
@@ -303,17 +303,17 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Check if content looks like ApiGorowler config
+            // Check if content looks like Silky config
             const text = document.getText();
             if (text.includes('rootContext:') && text.includes('steps:')) {
                 const action = await vscode.window.showInformationMessage(
-                    'This looks like an ApiGorowler configuration. Rename to .apigorowler.yaml to enable features?',
+                    'This looks like a Silky configuration. Rename to .silky.yaml to enable features?',
                     'Rename',
                     'Not now'
                 );
 
                 if (action === 'Rename') {
-                    await vscode.commands.executeCommand('apigorowler.convertToApiGorowlerYaml');
+                    await vscode.commands.executeCommand('silky.convertToSilkyYaml');
                 }
             }
         })
@@ -322,7 +322,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Also check on document open
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(async (document) => {
-            if (isApiGorowlerFile(document) && document.languageId !== 'yaml') {
+            if (isSilkyFile(document) && document.languageId !== 'yaml') {
                 await vscode.languages.setTextDocumentLanguage(document, 'yaml');
             }
         })
@@ -331,8 +331,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Auto-validate on save if enabled
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(async (document) => {
-            const config = vscode.workspace.getConfiguration('apigorowler');
-            if (config.get('autoValidate') && isApiGorowlerFile(document)) {
+            const config = vscode.workspace.getConfiguration('silky');
+            if (config.get('autoValidate') && isSilkyFile(document)) {
                 await crawlerRunner?.validate(document.uri.fsPath);
             }
         })
@@ -341,8 +341,8 @@ export function activate(context: vscode.ExtensionContext) {
     // Auto-run on save if enabled
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(async (document) => {
-            const config = vscode.workspace.getConfiguration('apigorowler');
-            if (config.get('autoRun') && isApiGorowlerFile(document)) {
+            const config = vscode.workspace.getConfiguration('silky');
+            if (config.get('autoRun') && isSilkyFile(document)) {
                 await crawlerRunner?.run(document.uri.fsPath);
             }
         })
@@ -353,10 +353,10 @@ export function deactivate() {
     crawlerRunner?.dispose();
 }
 
-function isApiGorowlerFile(document: vscode.TextDocument): boolean {
-    return document.languageId === 'apigorowler-yaml' ||
-           document.fileName.endsWith('.apigorowler.yaml') ||
-           document.fileName.endsWith('.apigorowler.yml');
+function isSilkyFile(document: vscode.TextDocument): boolean {
+    return document.languageId === 'silky-yaml' ||
+           document.fileName.endsWith('.silky.yaml') ||
+           document.fileName.endsWith('.silky.yml');
 }
 
 function showStepDetailsPanel(context: vscode.ExtensionContext, step: any) {
@@ -366,7 +366,7 @@ function showStepDetailsPanel(context: vscode.ExtensionContext, step: any) {
     }
 
     const panel = vscode.window.createWebviewPanel(
-        'apigorowlerStepDetails',
+        'silkyStepDetails',
         `Step: ${step.label}`,
         vscode.ViewColumn.Beside,
         {
@@ -742,28 +742,28 @@ function escapeHtml(text: string): string {
 }
 
 async function configureYamlExtension(context: vscode.ExtensionContext) {
-    // Configure YAML extension to recognize .apigorowler.yaml files
+    // Configure YAML extension to recognize .silky.yaml files
     const yamlConfig = vscode.workspace.getConfiguration('yaml');
     const filesConfig = vscode.workspace.getConfiguration('files');
 
     // Get schema URI
-    const schemaUri = vscode.Uri.joinPath(context.extensionUri, 'schemas', 'apigorowler-schema.json');
+    const schemaUri = vscode.Uri.joinPath(context.extensionUri, 'schemas', 'silky-schema.json');
 
     // Configure schemas
     const schemas = yamlConfig.get<Record<string, string[]>>('schemas') || {};
     const schemaKey = schemaUri.toString();
 
-    if (!schemas[schemaKey] || !schemas[schemaKey].includes('*.apigorowler.yaml')) {
-        schemas[schemaKey] = ['*.apigorowler.yaml', '*.apigorowler.yml'];
+    if (!schemas[schemaKey] || !schemas[schemaKey].includes('*.silky.yaml')) {
+        schemas[schemaKey] = ['*.silky.yaml', '*.silky.yml'];
         await yamlConfig.update('schemas', schemas, vscode.ConfigurationTarget.Workspace);
     }
 
     // Configure file associations
     const associations = filesConfig.get<Record<string, string>>('associations') || {};
 
-    if (associations['*.apigorowler.yaml'] !== 'yaml') {
-        associations['*.apigorowler.yaml'] = 'yaml';
-        associations['*.apigorowler.yml'] = 'yaml';
+    if (associations['*.silky.yaml'] !== 'yaml') {
+        associations['*.silky.yaml'] = 'yaml';
+        associations['*.silky.yml'] = 'yaml';
         await filesConfig.update('associations', associations, vscode.ConfigurationTarget.Workspace);
     }
 
@@ -771,7 +771,7 @@ async function configureYamlExtension(context: vscode.ExtensionContext) {
     const yamlExtension = vscode.extensions.getExtension('redhat.vscode-yaml');
     if (!yamlExtension) {
         const action = await vscode.window.showWarningMessage(
-            'ApiGorowler extension requires the YAML extension by Red Hat for syntax highlighting and validation.',
+            'Silky extension requires the YAML extension by Red Hat for syntax highlighting and validation.',
             'Install YAML Extension',
             'Later'
         );

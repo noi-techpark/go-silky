@@ -9,7 +9,7 @@ let globalEvents: StepProfilerData[] = [];
 let collapsedGroups: Set<string> = new Set();
 
 export class TimelineViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'apigorowler.timeline';
+    public static readonly viewType = 'silky.timeline';
     private _view?: vscode.WebviewView;
     private _outputChannel: vscode.OutputChannel;
 
@@ -42,7 +42,7 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                 case 'selectEvent':
                     this._outputChannel.appendLine('[TimelineViewProvider] Executing selectStepFromTimeline with eventId: ' + message.eventId);
                     // Execute command to select step in tree and show details
-                    vscode.commands.executeCommand('apigorowler.selectStepFromTimeline', message.eventId);
+                    vscode.commands.executeCommand('silky.selectStepFromTimeline', message.eventId);
                     break;
                 case 'toggleCollapse':
                     this._outputChannel.appendLine('[TimelineViewProvider] Toggling collapse for eventId: ' + message.eventId);

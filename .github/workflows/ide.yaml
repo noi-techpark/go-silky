@@ -35,7 +35,7 @@ jobs:
         run: |
           cd cmd/ide
           go mod download
-          output=../../out/go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}
+          output=../../out/go-silky-ide-${{ matrix.goos }}-${{ matrix.goarch }}
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
             output="${output}.exe"
           fi
@@ -44,8 +44,8 @@ jobs:
       - name: Upload binaries for release
         uses: actions/upload-artifact@v4
         with:
-          name: go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: out/go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: go-silky-ide-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/go-silky-ide-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   release:
     needs: build
@@ -65,4 +65,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           fail_on_unmatched_files: true
-          files: out/go-apigorowler-ide-*/*
+          files: out/go-silky-ide-*/*

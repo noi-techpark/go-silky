@@ -91,7 +91,7 @@ export class StepTreeItem extends vscode.TreeItem {
 
         // Set command to toggle accordion details on click
         this.command = {
-            command: 'apigorowler.toggleStepDetails',
+            command: 'silky.toggleStepDetails',
             title: 'Toggle Step Details',
             arguments: [this]
         };
