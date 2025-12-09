@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 NOI Techpark <digital@noi.bz.it>
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 import * as vscode from 'vscode';
 import { StepsTreeProvider, StepTreeItem } from './stepsTreeProvider';
 import { CrawlerRunner } from './crawlerRunner';

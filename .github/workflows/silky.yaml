@@ -6,9 +6,11 @@ on:
       - 'main'
     paths-ignore:
       - 'cmd/ide/**'
+      - 'cmd/cli/**'
   pull_request:
     paths-ignore:
       - 'cmd/ide/**'
+      - 'cmd/cli/**'
 
 jobs:
   reuse-check:
