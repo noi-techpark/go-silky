@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { StepProfilerData, ProfileEventType } from './stepsTreeProvider';
+import { getNonce, escapeHtml, getMediaUri } from './webviewUtils';
 
 // Store events globally so they persist across panel lifecycles
 let globalEvents: StepProfilerData[] = [];
@@ -7,10 +8,12 @@ let globalEvents: StepProfilerData[] = [];
 export class TimelinePanel {
     private static instance: TimelinePanel | undefined;
     private readonly panel: vscode.WebviewPanel;
+    private readonly extensionUri: vscode.Uri;
     private disposables: vscode.Disposable[] = [];
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
         this.panel = panel;
+        this.extensionUri = extensionUri;
 
         this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
 
@@ -83,141 +86,19 @@ export class TimelinePanel {
 
     private getHtmlContent(): string {
         const nonce = getNonce();
+        const styleUri = getMediaUri(this.panel.webview, this.extensionUri, 'styles', 'timeline.css');
 
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Execution Timeline</title>
+            <link rel="stylesheet" type="text/css" href="${styleUri}">
             <style>
-                body {
-                    font-family: var(--vscode-font-family);
-                    font-size: var(--vscode-font-size);
-                    color: var(--vscode-foreground);
-                    background-color: var(--vscode-editor-background);
-                    padding: 20px;
-                    overflow-x: auto;
-                }
-                .header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 20px;
-                    padding-bottom: 10px;
-                    border-bottom: 2px solid var(--vscode-panel-border);
-                }
-                .controls {
-                    display: flex;
-                    gap: 10px;
-                }
-                .btn {
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    padding: 5px 15px;
-                    cursor: pointer;
-                    border-radius: 2px;
-                    font-size: 0.9em;
-                }
-                .btn:hover {
-                    background: var(--vscode-button-hoverBackground);
-                }
-                #timeline {
-                    position: relative;
-                    min-height: 400px;
-                    max-height: 80vh;
-                    overflow-y: auto;
-                    overflow-x: auto;
-                    background: var(--vscode-editor-background);
-                }
-                .time-axis {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 30px;
-                    border-bottom: 1px solid var(--vscode-panel-border);
-                }
-                .time-marker {
-                    position: absolute;
-                    top: 0;
-                    bottom: 0;
-                    border-left: 1px solid var(--vscode-descriptionForeground);
-                    font-size: 10px;
-                    padding-left: 5px;
-                    color: var(--vscode-descriptionForeground);
-                }
-                .timeline-events {
-                    position: relative;
-                    margin-top: 40px;
-                }
-                .event-bar {
-                    position: absolute;
-                    height: 24px;
-                    border-radius: 3px;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    padding: 0 8px;
-                    font-size: 11px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    transition: opacity 0.2s;
-                }
-                .event-bar:hover {
-                    opacity: 0.8;
-                    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-                }
-                .event-instant {
-                    position: absolute;
-                    width: 3px;
-                    height: 24px;
-                    cursor: pointer;
-                }
-                .event-instant:hover {
-                    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-                }
-                /* Event type colors */
-                .event-root { background: var(--vscode-charts-purple); }
-                .event-request { background: var(--vscode-charts-blue); }
-                .event-foreach { background: var(--vscode-charts-orange); }
-                .event-page { background: var(--vscode-charts-green); }
-                .event-context { background: var(--vscode-charts-yellow); }
-                .event-url { background: var(--vscode-charts-blue); }
-                .event-http { background: var(--vscode-charts-blue); }
-                .event-response { background: var(--vscode-charts-green); }
-                .event-transform { background: var(--vscode-charts-yellow); }
-                .event-merge { background: var(--vscode-charts-purple); }
-                .event-parallel { background: var(--vscode-charts-red); }
-                .event-item { background: var(--vscode-charts-orange); }
-                .event-pagination { background: var(--vscode-charts-yellow); }
-                .event-result { background: var(--vscode-charts-green); }
-
-                .legend {
-                    margin-top: 20px;
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 15px;
-                    font-size: 11px;
-                }
-                .legend-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 5px;
-                }
-                .legend-color {
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 2px;
-                }
-                .empty-state {
-                    text-align: center;
-                    padding: 60px 20px;
-                    color: var(--vscode-descriptionForeground);
-                }
+                body { padding: 20px; }
+                #timeline { min-height: 400px; max-height: 80vh; }
             </style>
         </head>
         <body>
@@ -246,6 +127,10 @@ export class TimelinePanel {
                 <div class="legend-item">
                     <div class="legend-color event-foreach"></div>
                     <span>ForEach Step</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color event-forvalues"></div>
+                    <span>ForValues Step</span>
                 </div>
                 <div class="legend-item">
                     <div class="legend-color event-response"></div>
@@ -416,12 +301,14 @@ export class TimelinePanel {
             // Check if this is a START event
             if (eventType === ProfileEventType.EVENT_REQUEST_STEP_START ||
                 eventType === ProfileEventType.EVENT_FOREACH_STEP_START ||
+                eventType === ProfileEventType.EVENT_FORVALUES_STEP_START ||
                 eventType === ProfileEventType.EVENT_REQUEST_PAGE_START) {
                 startEvents.set(event.id, event);
             }
             // Check if this is an END event
             else if (eventType === ProfileEventType.EVENT_REQUEST_STEP_END ||
                      eventType === ProfileEventType.EVENT_FOREACH_STEP_END ||
+                     eventType === ProfileEventType.EVENT_FORVALUES_STEP_END ||
                      eventType === ProfileEventType.EVENT_REQUEST_PAGE_END) {
 
                 // Find corresponding START event
@@ -476,6 +363,9 @@ export class TimelinePanel {
             case ProfileEventType.EVENT_FOREACH_STEP_START:
             case ProfileEventType.EVENT_FOREACH_STEP_END:
                 return 'event-foreach';
+            case ProfileEventType.EVENT_FORVALUES_STEP_START:
+            case ProfileEventType.EVENT_FORVALUES_STEP_END:
+                return 'event-forvalues';
             case ProfileEventType.EVENT_REQUEST_PAGE_START:
             case ProfileEventType.EVENT_REQUEST_PAGE_END:
                 return 'event-page';
@@ -504,22 +394,4 @@ export class TimelinePanel {
                 return 'event-request';
         }
     }
-}
-
-function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
-
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }

@@ -1,0 +1,205 @@
+/* Shared styles for ApiGorowler VS Code extension panels */
+
+body {
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Header styles */
+.header {
+    border-bottom: 2px solid var(--vscode-panel-border);
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+
+.header h2 {
+    margin: 0 0 10px 0;
+    color: var(--vscode-titleBar-activeForeground);
+}
+
+.timestamp {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+}
+
+/* Section styles */
+.section {
+    margin-bottom: 20px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.section-title {
+    font-weight: 600;
+    color: var(--vscode-textLink-foreground);
+}
+
+/* Button styles */
+.actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 12px;
+    cursor: pointer;
+    border-radius: 2px;
+    font-size: 0.85em;
+}
+
+.btn:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+.btn-view.active {
+    background: var(--vscode-button-hoverBackground);
+    border: 2px solid var(--vscode-focusBorder);
+}
+
+/* Code block styles */
+.code-block {
+    background: var(--vscode-textCodeBlock-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    padding: 12px;
+    overflow-x: auto;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.code-block-large {
+    max-height: 800px;
+}
+
+/* Side-by-side comparison */
+.side-by-side {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.status-success {
+    background: var(--vscode-testing-iconPassed);
+    color: white;
+}
+
+.status-error {
+    background: var(--vscode-testing-iconFailed);
+    color: white;
+}
+
+/* Context path display */
+.context-path {
+    font-family: monospace;
+    background: var(--vscode-badge-background);
+    padding: 8px 12px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+/* Info box */
+.info-box {
+    background: var(--vscode-inputValidation-infoBackground);
+    border-left: 4px solid var(--vscode-inputValidation-infoBorder);
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 3px;
+}
+
+/* Details/summary */
+details {
+    margin: 10px 0;
+}
+
+summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 8px;
+    background: var(--vscode-list-hoverBackground);
+    border-radius: 3px;
+}
+
+summary:hover {
+    background: var(--vscode-list-activeSelectionBackground);
+}
+
+/* Diff styles */
+.comparison-view {
+    margin-top: 10px;
+}
+
+.diff-container {
+    max-height: 600px;
+    overflow-y: auto;
+    background: var(--vscode-textCodeBlock-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    padding: 12px;
+}
+
+.diff-view {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+.diff-line {
+    padding: 2px 8px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.diff-added {
+    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.15));
+    color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+}
+
+.diff-removed {
+    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.15));
+    color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+}
+
+.diff-unchanged {
+    color: var(--vscode-editor-foreground);
+    opacity: 0.6;
+}
+
+.diff-highlight {
+    background: var(--vscode-diffEditor-insertedTextBackground);
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 40px 15px;
+    color: var(--vscode-descriptionForeground);
+}

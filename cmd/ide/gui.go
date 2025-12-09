@@ -37,32 +37,34 @@ func escapeBrackets(input string) string {
 
 func getEventTypeName(t apigorowler.ProfileEventType) string {
 	names := map[apigorowler.ProfileEventType]string{
-		apigorowler.EVENT_ROOT_START:           "Root Start",
-		apigorowler.EVENT_REQUEST_STEP_START:   "Request Step Start",
-		apigorowler.EVENT_REQUEST_STEP_END:     "Request Step End",
-		apigorowler.EVENT_CONTEXT_SELECTION:    "Context Selection",
-		apigorowler.EVENT_REQUEST_PAGE_START:   "Request Page Start",
-		apigorowler.EVENT_REQUEST_PAGE_END:     "Request Page End",
-		apigorowler.EVENT_PAGINATION_EVAL:      "Pagination Evaluation",
-		apigorowler.EVENT_URL_COMPOSITION:      "URL Composition",
-		apigorowler.EVENT_REQUEST_DETAILS:      "Request Details",
-		apigorowler.EVENT_REQUEST_RESPONSE:     "Request Response",
-		apigorowler.EVENT_RESPONSE_TRANSFORM:   "Response Transform",
-		apigorowler.EVENT_CONTEXT_MERGE:        "Context Merge",
-		apigorowler.EVENT_FOREACH_STEP_START:   "ForEach Step Start",
-		apigorowler.EVENT_FOREACH_STEP_END:     "ForEach Step End",
-		apigorowler.EVENT_PARALLELISM_SETUP:    "Parallelism Setup",
-		apigorowler.EVENT_ITEM_SELECTION:       "Item Selection",
-		apigorowler.EVENT_AUTH_START:           "Auth Start",
-		apigorowler.EVENT_AUTH_CACHED:          "Auth Cached",
-		apigorowler.EVENT_AUTH_LOGIN_START:     "Auth Login Start",
-		apigorowler.EVENT_AUTH_LOGIN_END:       "Auth Login End",
-		apigorowler.EVENT_AUTH_TOKEN_EXTRACT:   "Token Extract",
-		apigorowler.EVENT_AUTH_TOKEN_INJECT:    "Token Inject",
-		apigorowler.EVENT_AUTH_END:             "Auth End",
-		apigorowler.EVENT_RESULT:               "Result",
-		apigorowler.EVENT_STREAM_RESULT:        "Stream Result",
-		apigorowler.EVENT_ERROR:                "Error",
+		apigorowler.EVENT_ROOT_START:            "Root Start",
+		apigorowler.EVENT_REQUEST_STEP_START:    "Request Step Start",
+		apigorowler.EVENT_REQUEST_STEP_END:      "Request Step End",
+		apigorowler.EVENT_CONTEXT_SELECTION:     "Context Selection",
+		apigorowler.EVENT_REQUEST_PAGE_START:    "Request Page Start",
+		apigorowler.EVENT_REQUEST_PAGE_END:      "Request Page End",
+		apigorowler.EVENT_PAGINATION_EVAL:       "Pagination Evaluation",
+		apigorowler.EVENT_URL_COMPOSITION:       "URL Composition",
+		apigorowler.EVENT_REQUEST_DETAILS:       "Request Details",
+		apigorowler.EVENT_REQUEST_RESPONSE:      "Request Response",
+		apigorowler.EVENT_RESPONSE_TRANSFORM:    "Response Transform",
+		apigorowler.EVENT_CONTEXT_MERGE:         "Context Merge",
+		apigorowler.EVENT_FOREACH_STEP_START:    "ForEach Step Start",
+		apigorowler.EVENT_FOREACH_STEP_END:      "ForEach Step End",
+		apigorowler.EVENT_FORVALUES_STEP_START:  "ForValues Step Start",
+		apigorowler.EVENT_FORVALUES_STEP_END:    "ForValues Step End",
+		apigorowler.EVENT_PARALLELISM_SETUP:     "Parallelism Setup",
+		apigorowler.EVENT_ITEM_SELECTION:        "Item Selection",
+		apigorowler.EVENT_AUTH_START:            "Auth Start",
+		apigorowler.EVENT_AUTH_CACHED:           "Auth Cached",
+		apigorowler.EVENT_AUTH_LOGIN_START:      "Auth Login Start",
+		apigorowler.EVENT_AUTH_LOGIN_END:        "Auth Login End",
+		apigorowler.EVENT_AUTH_TOKEN_EXTRACT:    "Token Extract",
+		apigorowler.EVENT_AUTH_TOKEN_INJECT:     "Token Inject",
+		apigorowler.EVENT_AUTH_END:              "Auth End",
+		apigorowler.EVENT_RESULT:                "Result",
+		apigorowler.EVENT_STREAM_RESULT:         "Stream Result",
+		apigorowler.EVENT_ERROR:                 "Error",
 	}
 	if name, ok := names[t]; ok {
 		return name
@@ -74,6 +76,7 @@ func isContainerEvent(t apigorowler.ProfileEventType) bool {
 	return t == apigorowler.EVENT_ROOT_START ||
 		t == apigorowler.EVENT_REQUEST_STEP_START ||
 		t == apigorowler.EVENT_FOREACH_STEP_START ||
+		t == apigorowler.EVENT_FORVALUES_STEP_START ||
 		t == apigorowler.EVENT_REQUEST_PAGE_START ||
 		t == apigorowler.EVENT_ITEM_SELECTION ||
 		t == apigorowler.EVENT_AUTH_START ||
@@ -84,6 +87,7 @@ func isStartEvent(t apigorowler.ProfileEventType) bool {
 	return t == apigorowler.EVENT_ROOT_START ||
 		t == apigorowler.EVENT_REQUEST_STEP_START ||
 		t == apigorowler.EVENT_FOREACH_STEP_START ||
+		t == apigorowler.EVENT_FORVALUES_STEP_START ||
 		t == apigorowler.EVENT_REQUEST_PAGE_START ||
 		t == apigorowler.EVENT_AUTH_START ||
 		t == apigorowler.EVENT_AUTH_LOGIN_START
@@ -92,6 +96,7 @@ func isStartEvent(t apigorowler.ProfileEventType) bool {
 func isEndEvent(t apigorowler.ProfileEventType) bool {
 	return t == apigorowler.EVENT_REQUEST_STEP_END ||
 		t == apigorowler.EVENT_FOREACH_STEP_END ||
+		t == apigorowler.EVENT_FORVALUES_STEP_END ||
 		t == apigorowler.EVENT_REQUEST_PAGE_END ||
 		t == apigorowler.EVENT_AUTH_END ||
 		t == apigorowler.EVENT_AUTH_LOGIN_END
@@ -775,7 +780,7 @@ func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 	switch data.Type {
 	case apigorowler.EVENT_ROOT_START:
 		c.formatRootStart(&detailsText, data)
-	case apigorowler.EVENT_REQUEST_STEP_START, apigorowler.EVENT_FOREACH_STEP_START:
+	case apigorowler.EVENT_REQUEST_STEP_START, apigorowler.EVENT_FOREACH_STEP_START, apigorowler.EVENT_FORVALUES_STEP_START:
 		c.formatStepStart(&detailsText, data)
 	case apigorowler.EVENT_CONTEXT_SELECTION:
 		c.formatContextSelection(&detailsText, data)

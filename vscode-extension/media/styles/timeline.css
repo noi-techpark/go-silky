@@ -1,0 +1,131 @@
+/* Timeline-specific styles for ApiGorowler VS Code extension */
+
+body {
+    padding: 10px;
+    overflow-x: auto;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.controls {
+    display: flex;
+    gap: 8px;
+}
+
+#timeline {
+    position: relative;
+    min-height: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    background: var(--vscode-editor-background);
+}
+
+.time-axis {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 25px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.time-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--vscode-descriptionForeground);
+    font-size: 9px;
+    padding-left: 3px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.timeline-events {
+    position: relative;
+    margin-top: 30px;
+}
+
+.event-bar {
+    position: absolute;
+    height: 22px;
+    border-radius: 2px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.2s;
+    color: #000000;
+    font-weight: 500;
+}
+
+.event-bar:hover {
+    opacity: 0.8;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.collapse-icon {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    margin-right: 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.collapse-icon:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+}
+
+/* Event type colors */
+.event-root { background: #9370DB; }        /* Medium Purple */
+.event-request { background: #4A90E2; }     /* Blue */
+.event-foreach { background: #FFA500; }     /* Orange */
+.event-forvalues { background: #9932CC; }   /* Dark Orchid */
+.event-page { background: #32CD32; }        /* Lime Green */
+.event-context { background: #FFD700; }     /* Gold */
+.event-url { background: #4A90E2; }         /* Blue */
+.event-http { background: #4A90E2; }        /* Blue */
+.event-response { background: #32CD32; }    /* Lime Green */
+.event-transform { background: #FFD700; }   /* Gold */
+.event-merge { background: #9370DB; }       /* Medium Purple */
+.event-parallel { background: #DC143C; }    /* Crimson */
+.event-item { background: #FFA500; }        /* Orange */
+.event-pagination { background: #FFD700; }  /* Gold */
+.event-result { background: #32CD32; }      /* Lime Green */
+
+/* Legend */
+.legend {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    font-size: 11px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 2px;
+}

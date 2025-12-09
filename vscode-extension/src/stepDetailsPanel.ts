@@ -1,14 +1,17 @@
 import * as vscode from 'vscode';
 import { StepProfilerData, ProfileEventType } from './stepsTreeProvider';
 import * as Diff from 'diff';
+import { getNonce, escapeHtml, getStatusText, formatBytes, getMediaUri } from './webviewUtils';
 
 export class StepDetailsPanel {
     private static currentPanel: StepDetailsPanel | undefined;
     private readonly panel: vscode.WebviewPanel;
+    private readonly extensionUri: vscode.Uri;
     private disposables: vscode.Disposable[] = [];
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
         this.panel = panel;
+        this.extensionUri = extensionUri;
 
         // Handle messages from the webview
         this.panel.webview.onDidReceiveMessage(
@@ -73,7 +76,7 @@ export class StepDetailsPanel {
         }
     }
 
-    private async openJsonInTab(content: string, title: string) {
+    private async openJsonInTab(content: string, _title: string) {
         const doc = await vscode.workspace.openTextDocument({
             content: content,
             language: 'json'
@@ -86,172 +89,18 @@ export class StepDetailsPanel {
 
     private getHtmlForStep(data: StepProfilerData): string {
         const nonce = getNonce();
+        const styleUri = getMediaUri(this.panel.webview, this.extensionUri, 'styles', 'shared.css');
 
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Step Details</title>
+            <link rel="stylesheet" type="text/css" href="${styleUri}">
             <style>
-                body {
-                    font-family: var(--vscode-font-family);
-                    font-size: var(--vscode-font-size);
-                    color: var(--vscode-foreground);
-                    background-color: var(--vscode-editor-background);
-                    padding: 20px;
-                    line-height: 1.6;
-                }
-                .header {
-                    border-bottom: 2px solid var(--vscode-panel-border);
-                    padding-bottom: 15px;
-                    margin-bottom: 20px;
-                }
-                .header h2 {
-                    margin: 0 0 10px 0;
-                    color: var(--vscode-titleBar-activeForeground);
-                }
-                .timestamp {
-                    color: var(--vscode-descriptionForeground);
-                    font-size: 0.9em;
-                }
-                .section {
-                    margin-bottom: 20px;
-                }
-                .section-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 8px;
-                }
-                .section-title {
-                    font-weight: 600;
-                    color: var(--vscode-textLink-foreground);
-                }
-                .actions {
-                    display: flex;
-                    gap: 10px;
-                }
-                .btn {
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    padding: 4px 12px;
-                    cursor: pointer;
-                    border-radius: 2px;
-                    font-size: 0.85em;
-                }
-                .btn:hover {
-                    background: var(--vscode-button-hoverBackground);
-                }
-                .btn-view.active {
-                    background: var(--vscode-button-hoverBackground);
-                    border: 2px solid var(--vscode-focusBorder);
-                }
-                .code-block {
-                    background: var(--vscode-textCodeBlock-background);
-                    border: 1px solid var(--vscode-panel-border);
-                    border-radius: 3px;
-                    padding: 12px;
-                    overflow-x: auto;
-                    max-height: 500px;
-                    overflow-y: auto;
-                    font-family: var(--vscode-editor-font-family);
-                    font-size: 0.9em;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                }
-                .code-block-large {
-                    max-height: 800px;
-                }
-                .side-by-side {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 15px;
-                    margin-top: 10px;
-                }
-                .diff-highlight {
-                    background: var(--vscode-diffEditor-insertedTextBackground);
-                    padding: 2px 4px;
-                    border-radius: 2px;
-                }
-                .status-badge {
-                    display: inline-block;
-                    padding: 4px 12px;
-                    border-radius: 12px;
-                    font-weight: 600;
-                    font-size: 0.9em;
-                }
-                .status-success {
-                    background: var(--vscode-testing-iconPassed);
-                    color: white;
-                }
-                .status-error {
-                    background: var(--vscode-testing-iconFailed);
-                    color: white;
-                }
-                .context-path {
-                    font-family: monospace;
-                    background: var(--vscode-badge-background);
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                    display: inline-block;
-                }
-                .info-box {
-                    background: var(--vscode-inputValidation-infoBackground);
-                    border-left: 4px solid var(--vscode-inputValidation-infoBorder);
-                    padding: 12px;
-                    margin-top: 10px;
-                    border-radius: 3px;
-                }
-                details {
-                    margin: 10px 0;
-                }
-                summary {
-                    cursor: pointer;
-                    font-weight: 600;
-                    padding: 8px;
-                    background: var(--vscode-list-hoverBackground);
-                    border-radius: 3px;
-                }
-                summary:hover {
-                    background: var(--vscode-list-activeSelectionBackground);
-                }
-                .comparison-view {
-                    margin-top: 10px;
-                }
-                .diff-container {
-                    max-height: 600px;
-                    overflow-y: auto;
-                    background: var(--vscode-textCodeBlock-background);
-                    border: 1px solid var(--vscode-panel-border);
-                    border-radius: 3px;
-                    padding: 12px;
-                }
-                .diff-view {
-                    font-family: var(--vscode-editor-font-family);
-                    font-size: 0.9em;
-                    line-height: 1.5;
-                }
-                .diff-line {
-                    padding: 2px 8px;
-                    margin: 0;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                }
-                .diff-added {
-                    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.15));
-                    color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
-                }
-                .diff-removed {
-                    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.15));
-                    color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-                }
-                .diff-unchanged {
-                    color: var(--vscode-editor-foreground);
-                    opacity: 0.6;
-                }
+                body { padding: 20px; }
             </style>
         </head>
         <body>
@@ -371,6 +220,8 @@ export class StepDetailsPanel {
                 return this.renderRequestStep(data);
             case ProfileEventType.EVENT_FOREACH_STEP_START:
                 return this.renderForEachStep(data);
+            case ProfileEventType.EVENT_FORVALUES_STEP_START:
+                return this.renderForValuesStep(data);
             case ProfileEventType.EVENT_CONTEXT_SELECTION:
                 return this.renderContextSelection(data);
             case ProfileEventType.EVENT_PAGINATION_EVAL:
@@ -496,6 +347,48 @@ export class StepDetailsPanel {
                     </div>
                 </div>
                 <details open>
+                    <summary>Configuration</summary>
+                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
+                </details>
+            </div>
+        `;
+    }
+
+    private renderForValuesStep(data: StepProfilerData): string {
+        const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
+        const values = JSON.stringify(data.data?.values || [], null, 2);
+        const duration = data.duration ? `${data.duration}ms` : 'In progress...';
+        const configId = `forvalues-step-config-${data.id}`;
+        const valuesId = `forvalues-values-${data.id}`;
+
+        return `
+            <div class="header">
+                <h2>📋 ForValues Step: ${data.name}</h2>
+                <div class="timestamp">⏱️  Started: ${new Date(data.timestamp).toLocaleString()}</div>
+                ${data.duration ? `<div class="timestamp">⏱️  Duration: ${duration}</div>` : ''}
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Literal Values</div>
+                    <div class="actions">
+                        <button class="btn btn-copy" data-target="${valuesId}">📋 Copy</button>
+                    </div>
+                </div>
+                <details open>
+                    <summary>Values to iterate</summary>
+                    <div class="code-block" id="${valuesId}">${escapeHtml(values)}</div>
+                </details>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Step Configuration</div>
+                    <div class="actions">
+                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
+                    </div>
+                </div>
+                <details>
                     <summary>Configuration</summary>
                     <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
                 </details>
@@ -1395,47 +1288,4 @@ export class StepDetailsPanel {
         html += '</div>';
         return html;
     }
-}
-
-function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
-
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;')
-        .replace(/`/g, '&#096;');
-}
-
-function getStatusText(code: number): string {
-    const codes: Record<number, string> = {
-        200: 'OK',
-        201: 'Created',
-        204: 'No Content',
-        400: 'Bad Request',
-        401: 'Unauthorized',
-        403: 'Forbidden',
-        404: 'Not Found',
-        500: 'Internal Server Error',
-        502: 'Bad Gateway',
-        503: 'Service Unavailable'
-    };
-    return codes[code] || '';
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }

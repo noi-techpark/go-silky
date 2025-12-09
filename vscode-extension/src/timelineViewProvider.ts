@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { StepProfilerData, ProfileEventType, StepsTreeProvider } from './stepsTreeProvider';
+import { getNonce, escapeHtml, getMediaUri } from './webviewUtils';
 
 // Store events globally so they persist across view lifecycles
 let globalEvents: StepProfilerData[] = [];
@@ -23,7 +24,7 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken,
     ) {
         this._view = webviewView;
@@ -94,125 +95,16 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
 
     private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = getNonce();
+        const styleUri = getMediaUri(webview, this._extensionUri, 'styles', 'timeline.css');
 
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Execution Timeline</title>
-            <style>
-                body {
-                    font-family: var(--vscode-font-family);
-                    font-size: var(--vscode-font-size);
-                    color: var(--vscode-foreground);
-                    background-color: var(--vscode-editor-background);
-                    padding: 10px;
-                    margin: 0;
-                    overflow-x: auto;
-                }
-                .header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 15px;
-                    padding-bottom: 8px;
-                    border-bottom: 1px solid var(--vscode-panel-border);
-                }
-                .controls {
-                    display: flex;
-                    gap: 8px;
-                }
-                .btn {
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border: none;
-                    padding: 4px 10px;
-                    cursor: pointer;
-                    border-radius: 2px;
-                    font-size: 0.85em;
-                }
-                .btn:hover {
-                    background: var(--vscode-button-hoverBackground);
-                }
-                #timeline {
-                    position: relative;
-                    min-height: 300px;
-                    max-height: 70vh;
-                    overflow-y: auto;
-                    overflow-x: auto;
-                    background: var(--vscode-editor-background);
-                }
-                .time-axis {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 25px;
-                    border-bottom: 1px solid var(--vscode-panel-border);
-                }
-                .time-marker {
-                    position: absolute;
-                    top: 0;
-                    bottom: 0;
-                    border-left: 1px solid var(--vscode-descriptionForeground);
-                    font-size: 9px;
-                    padding-left: 3px;
-                    color: var(--vscode-descriptionForeground);
-                }
-                .timeline-events {
-                    position: relative;
-                    margin-top: 30px;
-                }
-                .event-bar {
-                    position: absolute;
-                    height: 22px;
-                    border-radius: 2px;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    padding: 0 6px;
-                    font-size: 10px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    transition: opacity 0.2s;
-                    color: #000000;
-                    font-weight: 500;
-                }
-                .event-bar:hover {
-                    opacity: 0.8;
-                    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
-                }
-                .collapse-icon {
-                    display: inline-block;
-                    width: 18px;
-                    height: 18px;
-                    margin-right: 6px;
-                    cursor: pointer;
-                    user-select: none;
-                    font-size: 11px;
-                    line-height: 18px;
-                    text-align: center;
-                    flex-shrink: 0;
-                }
-                .collapse-icon:hover {
-                    background: rgba(255, 255, 255, 0.3);
-                    border-radius: 3px;
-                }
-                /* Event type colors - using darker shades for better contrast */
-                .event-root { background: #9370DB; }      /* Medium Purple */
-                .event-request { background: #4A90E2; }   /* Blue */
-                .event-foreach { background: #FFA500; }   /* Orange */
-                .event-page { background: #32CD32; }      /* Lime Green */
-
-                .empty-state {
-                    text-align: center;
-                    padding: 40px 15px;
-                    color: var(--vscode-descriptionForeground);
-                }
-            </style>
+            <link rel="stylesheet" type="text/css" href="${styleUri}">
         </head>
         <body>
             <div class="header">
@@ -486,11 +378,12 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         for (const step of allSteps) {
             const data = step.data;
 
-            // Only include container steps (Root, Request, ForEach, Page) that appear in timeline
+            // Only include container steps (Root, Request, ForEach, ForValues, Page) that appear in timeline
             const isContainerStep = (
                 data.type === ProfileEventType.EVENT_ROOT_START ||
                 data.type === ProfileEventType.EVENT_REQUEST_STEP_START ||
                 data.type === ProfileEventType.EVENT_FOREACH_STEP_START ||
+                data.type === ProfileEventType.EVENT_FORVALUES_STEP_START ||
                 data.type === ProfileEventType.EVENT_REQUEST_PAGE_START
             );
 
@@ -535,7 +428,7 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
             }
 
             // Recursively collect all container-type descendants (not just direct children)
-            // This handles cases like forEach where Item Selection events are intermediaries
+            // This handles cases like forEach/forValues where Item Selection events are intermediaries
             const collectContainerDescendants = (treeItem: any): string[] => {
                 const containerIds: string[] = [];
                 for (const child of treeItem.children) {
@@ -543,6 +436,7 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                         child.data.type === ProfileEventType.EVENT_ROOT_START ||
                         child.data.type === ProfileEventType.EVENT_REQUEST_STEP_START ||
                         child.data.type === ProfileEventType.EVENT_FOREACH_STEP_START ||
+                        child.data.type === ProfileEventType.EVENT_FORVALUES_STEP_START ||
                         child.data.type === ProfileEventType.EVENT_REQUEST_PAGE_START
                     );
 
@@ -602,6 +496,9 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
             case ProfileEventType.EVENT_FOREACH_STEP_START:
             case ProfileEventType.EVENT_FOREACH_STEP_END:
                 return 'event-foreach';
+            case ProfileEventType.EVENT_FORVALUES_STEP_START:
+            case ProfileEventType.EVENT_FORVALUES_STEP_END:
+                return 'event-forvalues';
             case ProfileEventType.EVENT_REQUEST_PAGE_START:
             case ProfileEventType.EVENT_REQUEST_PAGE_END:
                 return 'event-page';
@@ -609,22 +506,4 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                 return 'event-request';
         }
     }
-}
-
-function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
-
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }
