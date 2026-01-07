@@ -9,13 +9,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/itchyny/gojq"
@@ -1416,5 +1418,35 @@ func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[str
 		result[k] = v
 	}
 
-	return result
+	// Normalize float64 whole numbers to int64 to avoid scientific notation in templates
+	return normalizeTemplateValues(result).(map[string]interface{})
+}
+
+// normalizeTemplateValues recursively normalizes numeric values to prevent
+// scientific notation when rendering in templates (e.g., 100024999 instead of 1.00025e+08)
+func normalizeTemplateValues(v any) any {
+	switch val := v.(type) {
+	case float64:
+		// Check if float64 is a whole number (no fractional part)
+		if val == math.Trunc(val) && val >= math.MinInt64 && val <= math.MaxInt64 {
+			return int64(val)
+		}
+		// For floats with decimals, convert to string to avoid scientific notation
+		// Use 'f' format with -1 precision (minimum digits needed)
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			result[k] = normalizeTemplateValues(v)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, v := range val {
+			result[i] = normalizeTemplateValues(v)
+		}
+		return result
+	default:
+		return val
+	}
 }

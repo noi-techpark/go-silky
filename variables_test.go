@@ -237,6 +237,57 @@ func TestVariablesInHeaders(t *testing.T) {
 	assert.Equal(t, "no-template", transport.capturedHeaders.Get("X-Static"))
 }
 
+// TestVariablesLargeNumbers tests that large numbers are rendered without scientific notation
+func TestVariablesLargeNumbers(t *testing.T) {
+	transport := &headerBodyCapturingTransport{}
+
+	craw, _, err := NewApiCrawler("testdata/crawler/variables/config_headers_body.yaml")
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: transport}
+	craw.SetClient(client)
+
+	// Large number that would normally render as scientific notation (1.00025e+08)
+	vars := map[string]any{
+		"token":      "test",
+		"tenantId":   float64(100024999), // This is how JSON unmarshals large numbers
+		"searchTerm": "test",
+		"category":   "test",
+		"deepValue":  "test",
+	}
+
+	err = craw.Run(context.TODO(), vars)
+	require.Nil(t, err)
+
+	// Should render as "100024999" not "1.00025e+08" or "1.00025e&#43;08"
+	assert.Equal(t, "100024999", transport.capturedHeaders.Get("X-Tenant-Id"))
+}
+
+// TestVariablesFloatWithDecimals tests that floats with decimals are rendered without scientific notation
+func TestVariablesFloatWithDecimals(t *testing.T) {
+	transport := &headerBodyCapturingTransport{}
+
+	craw, _, err := NewApiCrawler("testdata/crawler/variables/config_headers_body.yaml")
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: transport}
+	craw.SetClient(client)
+
+	vars := map[string]any{
+		"token":      "test",
+		"tenantId":   float64(0.000001), // Very small number that would be 1e-06
+		"searchTerm": "test",
+		"category":   "test",
+		"deepValue":  "test",
+	}
+
+	err = craw.Run(context.TODO(), vars)
+	require.Nil(t, err)
+
+	// Should render as "0.000001" not "1e-06"
+	assert.Equal(t, "0.000001", transport.capturedHeaders.Get("X-Tenant-Id"))
+}
+
 // TestVariablesInBody tests that runtime variables are expanded in body
 func TestVariablesInBody(t *testing.T) {
 	transport := &headerBodyCapturingTransport{}
