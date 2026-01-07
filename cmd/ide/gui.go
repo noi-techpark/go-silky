@@ -148,6 +148,11 @@ func getHelpText() string {
   [yellow]N[-]             Previous search match
   [yellow]Esc[-]           Close context map viewer
 
+[green::b]Runtime Variables[-:-:-]
+  [yellow]v[-]             Set runtime variables (JSON)
+  Variables are accessible as {{ .varName }} in templates
+  and as $ctx.varName in jq expressions
+
 [green::b]View Controls[-:-:-]
   [yellow]Tab[-]           Switch focus between panels
   [yellow]?[-]             Toggle this help panel
@@ -237,6 +242,8 @@ type ConsoleApp struct {
 	// Diff view state
 	currentDiffView  string // "before", "after", or "diff"
 	currentEventData silky.StepProfilerData
+	// Runtime variables
+	runtimeVars map[string]any
 }
 
 func recoverAndLog(logger ConsoleLogger) {
@@ -518,11 +525,20 @@ func (c *ConsoleApp) gotoIDE(path string) {
 					c.showContextMapForEvent(c.currentEventData)
 				}
 				return nil
+			case 'v':
+				c.showVariablesModal()
+				return nil
 			}
 		case tcell.KeyEscape:
 			// Close context map if open (let it handle its own close)
 			if c.pages.HasPage("contextmap") {
 				c.pages.RemovePage("contextmap")
+				c.app.SetFocus(c.steps)
+				return nil
+			}
+			// Close variables modal if open
+			if c.pages.HasPage("variables") {
+				c.pages.RemovePage("variables")
 				c.app.SetFocus(c.steps)
 				return nil
 			}
@@ -766,9 +782,83 @@ func (c *ConsoleApp) toggleHelp() {
 	}
 }
 
+func (c *ConsoleApp) showVariablesModal() {
+	if c.pages.HasPage("variables") {
+		c.pages.RemovePage("variables")
+		return
+	}
+
+	// Get current vars as JSON string
+	varsJSON := "{}"
+	if c.runtimeVars != nil {
+		b, err := json.MarshalIndent(c.runtimeVars, "", "  ")
+		if err == nil {
+			varsJSON = string(b)
+		}
+	}
+
+	// Create text area for JSON input
+	textArea := tview.NewTextArea()
+	textArea.SetText(varsJSON, true)
+	textArea.SetBorder(true)
+	textArea.SetTitle(" Runtime Variables (JSON) ")
+
+	// Create buttons
+	saveButton := tview.NewButton("Save").SetSelectedFunc(func() {
+		text := textArea.GetText()
+		if text == "" || strings.TrimSpace(text) == "{}" {
+			c.runtimeVars = nil
+			c.appendLog("[green]Variables cleared")
+		} else {
+			var vars map[string]any
+			if err := json.Unmarshal([]byte(text), &vars); err != nil {
+				c.appendLog("[red]Invalid JSON: " + escapeBrackets(err.Error()))
+				return
+			}
+			c.runtimeVars = vars
+			c.appendLog("[green]Variables updated: " + escapeBrackets(fmt.Sprintf("%v", vars)))
+		}
+		c.pages.RemovePage("variables")
+		c.app.SetFocus(c.steps)
+	})
+
+	cancelButton := tview.NewButton("Cancel").SetSelectedFunc(func() {
+		c.pages.RemovePage("variables")
+		c.app.SetFocus(c.steps)
+	})
+
+	// Layout buttons
+	buttonRow := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(saveButton, 10, 0, false).
+		AddItem(nil, 2, 0, false).
+		AddItem(cancelButton, 10, 0, false).
+		AddItem(nil, 0, 1, false)
+
+	// Create form layout
+	formLayout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(textArea, 0, 1, true).
+		AddItem(buttonRow, 1, 0, false)
+
+	formLayout.SetBorder(true)
+	formLayout.SetTitle(" Set Runtime Variables ")
+
+	// Create centered modal
+	modal := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().
+			AddItem(nil, 0, 1, false).
+			AddItem(formLayout, 70, 1, true).
+			AddItem(nil, 0, 1, false), 0, 3, true).
+		AddItem(nil, 0, 1, false)
+
+	c.pages.AddPage("variables", modal, true, true)
+	c.app.SetFocus(textArea)
+}
+
 func (c *ConsoleApp) updateStatusBar() {
 	// Base status bar text
-	statusText := " [yellow]?[-] Help  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse"
+	statusText := " [yellow]?[-] Help  [yellow]v[-] Vars  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse"
 
 	// Add context map shortcut if current event has context data
 	if hasContextMapData(c.currentEventData) {
@@ -1472,7 +1562,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 			}()
 		}
 
-		err := craw.Run(ctx)
+		err := craw.Run(ctx, c.runtimeVars)
 
 		if err != nil {
 			c.appendLog("[red]" + escapeBrackets(err.Error()))

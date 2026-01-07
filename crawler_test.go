@@ -24,7 +24,7 @@ func TestExampleForeachValue(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -46,7 +46,7 @@ func TestExampleForeachValueCtx(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -80,7 +80,7 @@ func TestExampleForeachValueStream(t *testing.T) {
 		close(done)
 	}()
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	// Close stream to signal no more data, then wait for goroutine to finish
@@ -104,7 +104,7 @@ func TestExampleSingle(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -131,7 +131,7 @@ func TestExample2(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -153,7 +153,7 @@ func TestPaginatedIncrement(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -179,7 +179,7 @@ func TestPaginatedIncrementNested(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -215,7 +215,7 @@ func TestPaginatedIncrementStream(t *testing.T) {
 		}
 	}()
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	var expected interface{}
@@ -235,7 +235,7 @@ func TestPaginatedNextUrl(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -260,7 +260,7 @@ func TestParallelSimple(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -283,7 +283,7 @@ func TestParallelRateLimited(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -306,7 +306,7 @@ func TestParallelNoopMerge(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -343,7 +343,7 @@ func TestParallelErrorHandling(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 
 	// Error should be propagated, not swallowed by goroutines
 	require.NotNil(t, err, "Should return error when JSON decoding fails")
@@ -364,7 +364,7 @@ func TestParallelNestedParallelism(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -404,7 +404,7 @@ func TestParallelMultiRootParallel(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -450,7 +450,7 @@ func TestPostJSONBody(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	// Check for validation errors
@@ -476,7 +476,7 @@ func TestPostFormURLEncoded(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	// Check for validation errors
@@ -508,7 +508,7 @@ func TestPostBodyMergePagination(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	// Check for validation errors
@@ -539,7 +539,7 @@ func TestAuthBasic(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -557,7 +557,7 @@ func TestAuthBearer(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -576,7 +576,7 @@ func TestAuthOAuthPassword(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -595,7 +595,7 @@ func TestAuthOAuthClientCredentials(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -625,7 +625,7 @@ func TestAuthCookie(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -644,7 +644,7 @@ func TestAuthJWTBody(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -670,7 +670,7 @@ func TestAuthJWTHeader(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -700,7 +700,7 @@ func TestAuthCustomCookieToHeader(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -721,7 +721,7 @@ func TestAuthCustomBodyToQuery(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -740,7 +740,7 @@ func TestAuthMixedOverride(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -772,7 +772,7 @@ func TestForValuesContextPreservation(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -807,7 +807,7 @@ func TestForValuesDynamicKeys(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -848,7 +848,7 @@ func TestForValuesSimple(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -882,7 +882,7 @@ func TestForValuesNested(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -916,7 +916,7 @@ func TestForValuesWithObjects(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -950,7 +950,7 @@ func TestEdgeCaseDeepNesting(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()
@@ -988,7 +988,7 @@ func TestEdgeCaseMultipleForValues(t *testing.T) {
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err = craw.Run(context.TODO())
+	err = craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
 
 	data := craw.GetData()

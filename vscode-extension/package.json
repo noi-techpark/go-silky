@@ -80,6 +80,42 @@
         "command": "silky.convertToSilkyYaml",
         "title": "Convert to Silky YAML",
         "category": "Silky"
+      },
+      {
+        "command": "silky.setVariables",
+        "title": "Set Runtime Variables",
+        "icon": "$(symbol-variable)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.runWithVariables",
+        "title": "Run with Variables",
+        "icon": "$(play-circle)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.addVariable",
+        "title": "Add Variable",
+        "icon": "$(add)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.editVariable",
+        "title": "Edit Variable",
+        "icon": "$(edit)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.removeVariable",
+        "title": "Remove Variable",
+        "icon": "$(trash)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.clearVariables",
+        "title": "Clear All Variables",
+        "icon": "$(clear-all)",
+        "category": "Silky"
       }
     ],
     "menus": {
@@ -98,6 +134,11 @@
           "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
           "command": "silky.validateConfig",
           "group": "navigation@3"
+        },
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
+          "command": "silky.setVariables",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -115,6 +156,16 @@
           "command": "silky.exportSteps",
           "when": "view == silky.stepsExplorer",
           "group": "navigation@3"
+        },
+        {
+          "command": "silky.addVariable",
+          "when": "view == silky.variablesExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "silky.clearVariables",
+          "when": "view == silky.variablesExplorer",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -122,6 +173,16 @@
           "command": "silky.showStepDetails",
           "when": "view == silky.stepsExplorer",
           "group": "inline"
+        },
+        {
+          "command": "silky.editVariable",
+          "when": "view == silky.variablesExplorer && viewItem == variable",
+          "group": "inline@1"
+        },
+        {
+          "command": "silky.removeVariable",
+          "when": "view == silky.variablesExplorer && viewItem == variable",
+          "group": "inline@2"
         }
       ]
     },
@@ -132,6 +193,12 @@
           "name": "Execution Steps",
           "icon": "$(list-tree)",
           "contextualTitle": "Silky Steps"
+        },
+        {
+          "id": "silky.variablesExplorer",
+          "name": "Variables",
+          "icon": "$(symbol-variable)",
+          "contextualTitle": "Runtime Variables"
         }
       ],
       "silky-panel": [

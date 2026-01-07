@@ -1,0 +1,21 @@
+rootContext: {}
+steps:
+  - type: request
+    name: Test Headers and Body Templating
+    request:
+      url: "https://api.example.com/submit"
+      method: POST
+      headers:
+        Authorization: "Bearer {{ .token }}"
+        X-Tenant-Id: "{{ .tenantId }}"
+        X-Static: "no-template"
+        Content-Type: "application/json"
+      body:
+        query: "{{ .searchTerm }}"
+        filters:
+          category: "{{ .category }}"
+          limit: 10
+        nested:
+          deep:
+            value: "{{ .deepValue }}"
+    resultTransformer: .

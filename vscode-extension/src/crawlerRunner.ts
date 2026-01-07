@@ -24,7 +24,7 @@ export class CrawlerRunner {
         this.context.subscriptions.push(this.diagnosticCollection);
     }
 
-    async run(configPath: string): Promise<void> {
+    async run(configPath: string, variables?: Record<string, any>): Promise<void> {
         this.stop();
         this.stepsProvider.clear();
         this.timelineProvider.clear();
@@ -40,6 +40,9 @@ export class CrawlerRunner {
 
         this.outputChannel.appendLine(`Running Silky on: ${configPath}`);
         this.outputChannel.appendLine(`Using Go executable: ${goPath}`);
+        if (variables && Object.keys(variables).length > 0) {
+            this.outputChannel.appendLine(`Variables: ${JSON.stringify(variables)}`);
+        }
         this.outputChannel.appendLine('---');
 
         try {
@@ -65,12 +68,18 @@ export class CrawlerRunner {
                         const binaryPath = path.join(idePath, 'silky');
                         command = binaryPath;
                         args = ['-config', configPath, '-profiler'];
+                        if (variables && Object.keys(variables).length > 0) {
+                            args.push('-vars', JSON.stringify(variables));
+                        }
                         cwd = path.dirname(configPath);
                         this.outputChannel.appendLine(`Using bundled binary: ${binaryPath}`);
                     } else {
                         // Using go run
                         command = goPath;
                         args = ['run', '.', '-config', configPath, '-profiler'];
+                        if (variables && Object.keys(variables).length > 0) {
+                            args.push('-vars', JSON.stringify(variables));
+                        }
                         cwd = idePath;
                         this.outputChannel.appendLine(`Using go run in: ${idePath}`);
                     }

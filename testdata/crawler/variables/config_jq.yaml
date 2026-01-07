@@ -1,0 +1,16 @@
+# Test: Runtime variables in jq expressions
+# Demonstrates: Variables are accessible as $ctx.varName in merge rules
+
+rootContext: {}
+
+steps:
+  - type: request
+    name: Fetch data
+    request:
+      url: "https://api.example.com/items"
+      method: GET
+      headers:
+        Accept: application/json
+    resultTransformer: '.'
+    # Use $ctx.limit to access runtime variable in jq
+    mergeOn: ".items = ($res.items | .[0:$ctx.limit])"

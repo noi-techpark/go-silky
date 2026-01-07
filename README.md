@@ -80,6 +80,7 @@ cd cmd/ide && go run .
 | `Enter` | Select step / Expand details |
 | `j`/`k` or `Up`/`Down` | Navigate steps |
 | `c` | View context map |
+| `v` | Set runtime variables (JSON) |
 | `r` | Restart execution |
 | `s` | Stop execution |
 | `d` | Dump execution tree to /out |
@@ -226,6 +227,82 @@ After a step executes, its result can be merged back into a context using severa
 * **Default**: If no merge option is specified, arrays are appended and objects are shallow-merged
 
 These options are mutually exclusive - only one can be specified per step.
+
+---
+
+## Runtime Variables
+
+Silky supports runtime variables that can be injected into your configuration at execution time. This allows you to:
+
+- Pass API keys, tokens, or secrets without hardcoding them
+- Configure environment-specific values (production, staging, development)
+- Share configurations across different contexts
+
+### Variable Injection
+
+Variables are passed as a `map[string]any` to the `Run()` method and are accessible in:
+
+1. **URL templates**: Use `{{ .variableName }}`
+2. **Headers**: Use `{{ .variableName }}`
+3. **Request body**: Use `{{ .variableName }}` (recursively in nested objects)
+4. **Merge rules (JQ expressions)**: Use `$ctx.variableName`
+
+Variables are injected at the root level of the template context with highest priority, meaning they override any context values with the same name.
+
+### CLI Usage
+
+```bash
+# Pass variables via JSON flag
+silky -config my-config.silky.yaml -vars '{"apiKey":"abc123","env":"prod"}'
+
+# Complex variables
+silky -config config.yaml -vars '{"auth":{"user":"admin","pass":"secret"},"limit":100}'
+```
+
+### Example Configuration
+
+```yaml
+rootContext: {}
+steps:
+  - type: request
+    name: Fetch Data
+    request:
+      url: "https://api.example.com/{{ .env }}/data"
+      method: POST
+      headers:
+        Authorization: "Bearer {{ .apiKey }}"
+        Content-Type: application/json
+      body:
+        query: "{{ .searchTerm }}"
+        filters:
+          startDate: "{{ .startFrom }}"
+          endDate: "{{ .endTo }}"
+    resultTransformer: |
+      .items | map(select(.category == $ctx.category))
+```
+
+**Run with:**
+```bash
+silky -config example.yaml -vars '{"env":"production","apiKey":"secret123","searchTerm":"test","startFrom":"2024-01-01","endTo":"2024-12-31","category":"active"}'
+```
+
+### Terminal IDE Usage
+
+Press `v` to open the variables input modal. Enter JSON and press Save. Variables persist across restarts until modified.
+
+### VS Code Extension Usage
+
+The VS Code extension provides a dedicated **Variables** panel in the Silky sidebar (similar to the Watch panel in debuggers):
+
+1. **Variables Panel** - Located under "Execution Steps" in the Silky sidebar
+   - Click `+` to add a new variable
+   - Click the edit icon on a variable to modify it
+   - Click the trash icon to remove a variable
+   - Click "Clear All" to remove all variables
+
+2. **Bulk Edit** - Use the command palette: `Silky: Set Runtime Variables` to enter all variables as JSON
+
+3. Variables persist across runs until cleared
 
 ---
 

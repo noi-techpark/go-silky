@@ -20,6 +20,7 @@ func main() {
 	configPath := flag.String("config", "", "Path to YAML configuration file")
 	profilerFlag := flag.Bool("profiler", false, "Enable profiler output (JSON per step)")
 	validateFlag := flag.Bool("validate", false, "Only validate configuration without running")
+	varsFlag := flag.String("vars", "", "Runtime variables as JSON object (e.g., '{\"key\":\"value\"}')")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -43,6 +44,15 @@ func main() {
 	// Then check for other errors (file not found, parse errors, etc.)
 	if err != nil {
 		log.Fatalf("Failed to create crawler: %v", err)
+	}
+
+	// Parse runtime variables if provided
+	var vars map[string]any
+	if *varsFlag != "" {
+		if err := json.Unmarshal([]byte(*varsFlag), &vars); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid JSON in -vars flag: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if *validateFlag {
@@ -97,7 +107,7 @@ func main() {
 
 	// Run crawler
 	ctx := context.Background()
-	err = crawler.Run(ctx)
+	err = crawler.Run(ctx, vars)
 
 	// Wait for stream to finish if in stream mode
 	if crawler.Config.Stream {

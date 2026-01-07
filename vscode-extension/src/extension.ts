@@ -7,11 +7,13 @@ import { StepsTreeProvider, StepTreeItem } from './stepsTreeProvider';
 import { CrawlerRunner } from './crawlerRunner';
 import { StepDetailsPanel } from './stepDetailsPanel';
 import { TimelineViewProvider } from './timelineViewProvider';
+import { VariablesTreeProvider, VariableTreeItem } from './variablesTreeProvider';
 import * as Diff from 'diff';
 
 let crawlerRunner: CrawlerRunner | undefined;
 let stepsTreeProvider: StepsTreeProvider | undefined;
 let timelineViewProvider: TimelineViewProvider | undefined;
+let variablesTreeProvider: VariablesTreeProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Silky extension is now active');
@@ -19,7 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Configure YAML extension to recognize our files
     configureYamlExtension(context);
 
-    // Initialize tree provider
+    // Initialize steps tree provider
     stepsTreeProvider = new StepsTreeProvider();
     const stepsTreeView = vscode.window.createTreeView('silky.stepsExplorer', {
         treeDataProvider: stepsTreeProvider,
@@ -27,6 +29,15 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(stepsTreeView);
+
+    // Initialize variables tree provider
+    variablesTreeProvider = new VariablesTreeProvider();
+    const variablesTreeView = vscode.window.createTreeView('silky.variablesExplorer', {
+        treeDataProvider: variablesTreeProvider,
+        showCollapseAll: true
+    });
+
+    context.subscriptions.push(variablesTreeView);
 
     // Create output channel for timeline debugging
     const timelineOutputChannel = vscode.window.createOutputChannel('Silky Timeline');
@@ -89,6 +100,55 @@ export function activate(context: vscode.ExtensionContext) {
         return undefined;
     };
 
+    // Helper function to prompt for a single variable
+    const promptForVariable = async (existingKey?: string, existingValue?: any): Promise<{ key: string; value: any } | undefined> => {
+        const key = await vscode.window.showInputBox({
+            prompt: 'Enter variable name',
+            value: existingKey || '',
+            placeHolder: 'apiKey',
+            validateInput: (value) => {
+                if (!value || value.trim() === '') {
+                    return 'Variable name is required';
+                }
+                if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+                    return 'Variable name must be a valid identifier';
+                }
+                return null;
+            }
+        });
+
+        if (!key) {
+            return undefined;
+        }
+
+        const valueStr = await vscode.window.showInputBox({
+            prompt: `Enter value for "${key}" (JSON format for objects/arrays, or plain text for strings)`,
+            value: existingValue !== undefined ? JSON.stringify(existingValue) : '',
+            placeHolder: '"my-value" or {"nested": "object"} or 123',
+            validateInput: (value) => {
+                if (!value || value.trim() === '') {
+                    return 'Value is required';
+                }
+                // Try to parse as JSON, if fails treat as string
+                return null;
+            }
+        });
+
+        if (valueStr === undefined) {
+            return undefined;
+        }
+
+        let value: any;
+        try {
+            value = JSON.parse(valueStr);
+        } catch {
+            // If not valid JSON, treat as string
+            value = valueStr;
+        }
+
+        return { key, value };
+    };
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('silky.run', async () => {
@@ -99,7 +159,129 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             await document.save();
-            await crawlerRunner?.run(document.uri.fsPath);
+            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
+        })
+    );
+
+    // setVariables - bulk set via JSON input (for backwards compatibility)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.setVariables', async () => {
+            const existingJson = variablesTreeProvider?.getVariables()
+                ? JSON.stringify(variablesTreeProvider.getVariables(), null, 2)
+                : '{}';
+
+            const result = await vscode.window.showInputBox({
+                prompt: 'Enter runtime variables as JSON object',
+                value: existingJson,
+                validateInput: (value) => {
+                    if (!value || value.trim() === '' || value.trim() === '{}') {
+                        return null;
+                    }
+                    try {
+                        JSON.parse(value);
+                        return null;
+                    } catch (e: any) {
+                        return `Invalid JSON: ${e.message}`;
+                    }
+                },
+                placeHolder: '{"apiKey": "xxx", "environment": "production"}'
+            });
+
+            if (result === undefined) {
+                return;
+            }
+
+            if (result.trim() === '' || result.trim() === '{}') {
+                variablesTreeProvider?.clearVariables();
+                vscode.window.showInformationMessage('Variables cleared');
+            } else {
+                try {
+                    const vars = JSON.parse(result);
+                    variablesTreeProvider?.setVariables(vars);
+                    vscode.window.showInformationMessage(
+                        `Variables set: ${Object.keys(vars).join(', ')}`
+                    );
+                } catch {
+                    // Should not happen due to validation
+                }
+            }
+        })
+    );
+
+    // addVariable - add a single variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.addVariable', async () => {
+            const result = await promptForVariable();
+            if (result) {
+                variablesTreeProvider?.addVariable(result.key, result.value);
+            }
+        })
+    );
+
+    // editVariable - edit an existing variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.editVariable', async (item: VariableTreeItem) => {
+            if (!item || !item.isRoot) {
+                return;
+            }
+            const result = await promptForVariable(item.key, item.value);
+            if (result) {
+                // Remove old key if renamed
+                if (result.key !== item.key) {
+                    variablesTreeProvider?.removeVariable(item.key);
+                }
+                variablesTreeProvider?.addVariable(result.key, result.value);
+            }
+        })
+    );
+
+    // removeVariable - remove a single variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.removeVariable', async (item: VariableTreeItem) => {
+            if (!item || !item.isRoot) {
+                return;
+            }
+            variablesTreeProvider?.removeVariable(item.key);
+        })
+    );
+
+    // clearVariables - remove all variables
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.clearVariables', async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                'Clear all runtime variables?',
+                { modal: true },
+                'Clear'
+            );
+            if (confirm === 'Clear') {
+                variablesTreeProvider?.clearVariables();
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.runWithVariables', async () => {
+            const document = await getSilkyDocument();
+            if (!document) {
+                vscode.window.showWarningMessage('No Silky configuration file found. Please open an .silky.yaml file.');
+                return;
+            }
+
+            // Focus the variables panel to let user modify before running
+            await vscode.commands.executeCommand('silky.variablesExplorer.focus');
+
+            const proceed = await vscode.window.showInformationMessage(
+                'Review variables in the Variables panel, then click Run',
+                'Run',
+                'Cancel'
+            );
+
+            if (proceed !== 'Run') {
+                return;
+            }
+
+            await document.save();
+            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
         })
     );
 
@@ -347,7 +529,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidSaveTextDocument(async (document) => {
             const config = vscode.workspace.getConfiguration('silky');
             if (config.get('autoRun') && isSilkyFile(document)) {
-                await crawlerRunner?.run(document.uri.fsPath);
+                await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
             }
         })
     );

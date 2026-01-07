@@ -1,0 +1,16 @@
+# Test: Runtime variables in URL template
+# Demonstrates: Variables passed to Run() are accessible in templates as {{ .varName }}
+
+rootContext: {}
+
+steps:
+  - type: request
+    name: Fetch data with API key
+    request:
+      # Variables are injected at template root level
+      url: "https://api.example.com/data?apiKey={{ .apiKey }}&env={{ .environment }}"
+      method: GET
+      headers:
+        Accept: application/json
+    resultTransformer: '.'
+    mergeOn: ". = $res"

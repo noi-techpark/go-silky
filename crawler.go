@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,6 +134,7 @@ type ApiCrawler struct {
 	ContextMap          map[string]*Context
 	globalAuthenticator Authenticator
 	DataStream          chan any
+	runVars             map[string]any // Runtime variables injected at execution time
 	logger              Logger
 	httpClient          HTTPClient
 	profiler            *Profiler
@@ -241,6 +243,58 @@ func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) 
 	return code, nil
 }
 
+// expandTemplate expands a string using Go templates if it contains template markers.
+// Returns the original string if no template markers are found or on error.
+func (a *ApiCrawler) expandTemplate(s string, ctx map[string]any) (string, error) {
+	// Skip if no template markers - optimization to avoid unnecessary parsing
+	if !strings.Contains(s, "{{") {
+		return s, nil
+	}
+
+	tmpl, err := a.getOrCompileTemplate(s)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, ctx); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
+// expandBodyValue recursively expands template strings in body values.
+// Handles strings, maps, and slices. Other types are passed through unchanged.
+func (a *ApiCrawler) expandBodyValue(v any, ctx map[string]any) (any, error) {
+	switch val := v.(type) {
+	case string:
+		return a.expandTemplate(val, ctx)
+	case map[string]any:
+		result := make(map[string]any)
+		for k, v := range val {
+			expanded, err := a.expandBodyValue(v, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("error expanding body key %s: %w", k, err)
+			}
+			result[k] = expanded
+		}
+		return result, nil
+	case []any:
+		result := make([]any, len(val))
+		for i, v := range val {
+			expanded, err := a.expandBodyValue(v, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("error expanding body index %d: %w", i, err)
+			}
+			result[i] = expanded
+		}
+		return result, nil
+	default:
+		return val, nil
+	}
+}
+
 func newStepExecution(step Step, currentContextKey string, contextMap map[string]*Context, parentID string) *stepExecution {
 	return &stepExecution{
 		step:              step,
@@ -251,7 +305,7 @@ func newStepExecution(step Step, currentContextKey string, contextMap map[string
 	}
 }
 
-func (c *ApiCrawler) Run(ctx context.Context) error {
+func (c *ApiCrawler) Run(ctx context.Context, vars map[string]any) error {
 	// instantiate global authenticator at Run time so we force the authenticator to refresh
 	if c.Config.Authentication != nil {
 		c.globalAuthenticator = NewAuthenticator(*c.Config.Authentication, c.httpClient)
@@ -272,6 +326,11 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 
 	c.ContextMap["root"] = rootCtx
 	currentContext := "root"
+
+	c.runVars = vars
+	defer func() {
+		c.runVars = map[string]any{}
+	}()
 
 	// Emit ROOT_START event
 	rootID := c.profiler.EmitRootStart(c.Config, c.ContextMap)
@@ -311,7 +370,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	stepStartTime := time.Now()
 	stepID := c.profiler.EmitRequestStepStart(exec.step, exec.parentID)
 
-	templateCtx := contextMapToTemplate(exec.contextMap)
+	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
 
 	// Determine authenticator (request-specific overrides global)
 	authenticator := c.globalAuthenticator
@@ -880,7 +939,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	}
 
 	// Determine merge strategy
-	templateCtx := contextMapToTemplate(exec.contextMap)
+	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
 
 	// Check if custom merge rules are specified
 	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil || exec.step.NoopMerge
@@ -1131,13 +1190,22 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 	urlObj.RawQuery = query.Encode()
 
-	// Merge configured body with pagination body params
+	// Merge configured body with pagination body params, expanding templates
 	mergedBody := make(map[string]any)
 	for k, v := range ctx.configuredBody {
-		mergedBody[k] = v
+		expanded, err := c.expandBodyValue(v, templateCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error expanding body field %s: %w", k, err)
+		}
+		mergedBody[k] = expanded
 	}
 	for k, v := range ctx.bodyParams {
-		mergedBody[k] = v
+		// Pagination body params are typically not templated, but expand just in case
+		expanded, err := c.expandBodyValue(v, templateCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error expanding pagination body field %s: %w", k, err)
+		}
+		mergedBody[k] = expanded
 	}
 
 	// Determine content type
@@ -1172,12 +1240,20 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		return nil, nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}
 
-	// Apply headers (priority: global < request-specific < pagination)
+	// Apply headers with template expansion (priority: global < request-specific < pagination)
 	for k, v := range globalHeaders {
-		req.Header.Set(k, v)
+		expanded, err := c.expandTemplate(v, templateCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error expanding global header %s: %w", k, err)
+		}
+		req.Header.Set(k, expanded)
 	}
 	for k, v := range ctx.headers {
-		req.Header.Set(k, v)
+		expanded, err := c.expandTemplate(v, templateCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error expanding header %s: %w", k, err)
+		}
+		req.Header.Set(k, expanded)
 	}
 
 	// Set Content-Type header if body is present
@@ -1301,7 +1377,7 @@ func childMapWithClonedContext(base map[string]*Context, currentContext *Context
 	}
 }
 
-func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
+func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	// First pass: add all contexts by their key
@@ -1332,6 +1408,12 @@ func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
 				}
 			}
 		}
+	}
+
+	// Last: inject runtime variables at root level (highest priority, overrides everything)
+	// This allows {{ .varName }} to resolve directly to the runtime variable
+	for k, v := range vars {
+		result[k] = v
 	}
 
 	return result
