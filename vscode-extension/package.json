@@ -205,15 +205,16 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run build:binary:all",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run esbuild-base -- --minify && npm run build:binary:all",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "compile": "npm run esbuild-base -- --sourcemap",
+    "watch": "npm run esbuild-base -- --sourcemap --watch",
     "build:binary": "node scripts/build-all-platforms.js",
     "build:binary:all": "node scripts/build-all-platforms.js",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "package": "npm run build:binary:all && vsce package"
+    "package": "npm run esbuild-base -- --minify && npm run build:binary:all && vsce package"
   },
   "devDependencies": {
     "@types/node": "^18.x",
@@ -221,7 +222,8 @@
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "@vscode/test-electron": "^2.3.0",
-    "@vscode/vsce": "^2.19.0",
+    "@vscode/vsce": "^3.7.0",
+    "esbuild": "^0.27.2",
     "eslint": "^8.40.0",
     "typescript": "^5.1.0"
   },

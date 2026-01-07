@@ -15,8 +15,9 @@ steps:
   # Simple request step
   - type: request
     name: "Fetch users"
-    url: "https://jsonplaceholder.typicode.com/users"
-    method: GET
+    request:
+      url: "https://jsonplaceholder.typicode.com/users"
+      method: GET
     resultTransformer: .
     mergeOn: ". = $res"
 
@@ -28,8 +29,9 @@ steps:
       # Nested request using template
       - type: request
         name: "Fetch user posts"
-        url: "https://jsonplaceholder.typicode.com/users/{{.id}}/posts"
-        method: GET
+        request:
+          url: "https://jsonplaceholder.typicode.com/users/{{.id}}/posts"
+          method: GET
         resultTransformer: .
         mergeWithParentOn: ".posts = $res"
 
