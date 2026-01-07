@@ -1243,19 +1243,20 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 
 	// Apply headers with template expansion (priority: global < request-specific < pagination)
+	// Use direct map assignment to preserve exact header casing (Set() canonicalizes)
 	for k, v := range globalHeaders {
 		expanded, err := c.expandTemplate(v, templateCtx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error expanding global header %s: %w", k, err)
 		}
-		req.Header.Set(k, expanded)
+		req.Header[k] = []string{expanded}
 	}
 	for k, v := range ctx.headers {
 		expanded, err := c.expandTemplate(v, templateCtx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error expanding header %s: %w", k, err)
 		}
-		req.Header.Set(k, expanded)
+		req.Header[k] = []string{expanded}
 	}
 
 	// Set Content-Type header if body is present

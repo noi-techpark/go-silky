@@ -231,10 +231,43 @@ func TestVariablesInHeaders(t *testing.T) {
 	err = craw.Run(context.TODO(), vars)
 	require.Nil(t, err)
 
-	// Verify headers were templated correctly
+	// Verify headers were templated correctly (using Get which canonicalizes)
 	assert.Equal(t, "Bearer my-secret-token", transport.capturedHeaders.Get("Authorization"))
 	assert.Equal(t, "tenant-123", transport.capturedHeaders.Get("X-Tenant-Id"))
 	assert.Equal(t, "no-template", transport.capturedHeaders.Get("X-Static"))
+
+	// Verify exact header casing is preserved (direct map access)
+	assert.NotNil(t, transport.capturedHeaders["X-Tenant-Id"], "Header casing should be preserved as X-Tenant-Id")
+	assert.NotNil(t, transport.capturedHeaders["X-Static"], "Header casing should be preserved as X-Static")
+}
+
+// TestVariablesHeaderCasingPreserved tests that exact header casing is preserved (e.g., X-API-KEY not X-Api-Key)
+func TestVariablesHeaderCasingPreserved(t *testing.T) {
+	transport := &headerBodyCapturingTransport{}
+
+	craw, _, err := NewApiCrawler("testdata/crawler/variables/config_headers_allcaps.yaml")
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: transport}
+	craw.SetClient(client)
+
+	vars := map[string]any{
+		"apiKey": "secret-key-123",
+	}
+
+	err = craw.Run(context.TODO(), vars)
+	require.Nil(t, err)
+
+	// Verify exact header casing is preserved (all caps)
+	assert.NotNil(t, transport.capturedHeaders["X-API-KEY"], "Header X-API-KEY should preserve exact casing")
+	assert.Equal(t, []string{"secret-key-123"}, transport.capturedHeaders["X-API-KEY"])
+
+	assert.NotNil(t, transport.capturedHeaders["X-CUSTOM-HEADER"], "Header X-CUSTOM-HEADER should preserve exact casing")
+	assert.Equal(t, []string{"static-value"}, transport.capturedHeaders["X-CUSTOM-HEADER"])
+
+	// Verify canonicalized versions don't exist
+	assert.Nil(t, transport.capturedHeaders["X-Api-Key"], "Should not have canonicalized X-Api-Key")
+	assert.Nil(t, transport.capturedHeaders["X-Custom-Header"], "Should not have canonicalized X-Custom-Header")
 }
 
 // TestVariablesLargeNumbers tests that large numbers are rendered without scientific notation

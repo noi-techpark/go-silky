@@ -1,0 +1,11 @@
+rootContext: {}
+steps:
+  - type: request
+    name: Test All Caps Headers
+    request:
+      url: "https://api.example.com/test"
+      method: GET
+      headers:
+        X-API-KEY: "{{ .apiKey }}"
+        X-CUSTOM-HEADER: "static-value"
+    resultTransformer: .
