@@ -15,12 +15,9 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
-	"text/template"
 	"time"
 
-	"github.com/itchyny/gojq"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 )
@@ -93,19 +90,12 @@ type Context struct {
 
 type stepExecution struct {
 	step              Step
+	stepPath          string        // Unique path to this step (e.g., "steps[0].steps[1]")
+	compiledStep      *CompiledStep // Pre-compiled expressions for this step (nil if not available)
 	currentContextKey string
 	currentContext    *Context
 	contextMap        map[string]*Context
 	parentID          string // Parent step ID for profiler hierarchy
-}
-
-// mergeOperation encapsulates the parameters needed for a merge operation
-type mergeOperation struct {
-	step            Step
-	currentContext  *Context
-	contextMap      map[string]*Context
-	result          any
-	templateContext map[string]any
 }
 
 // httpRequestContext encapsulates HTTP request preparation parameters
@@ -120,6 +110,7 @@ type httpRequestContext struct {
 	queryParams    map[string]string
 	nextPageURL    string
 	authenticator  Authenticator
+	compiledStep   *CompiledStep // Pre-compiled templates (nil for fallback)
 }
 
 // forEachResult holds the result of a single forEach iteration
@@ -133,6 +124,7 @@ type forEachResult struct {
 
 type ApiCrawler struct {
 	Config              Config
+	CompiledConfig      *CompiledConfig // Pre-compiled JQ/templates (nil for legacy mode)
 	ContextMap          map[string]*Context
 	globalAuthenticator Authenticator
 	DataStream          chan any
@@ -140,8 +132,6 @@ type ApiCrawler struct {
 	logger              Logger
 	httpClient          HTTPClient
 	profiler            *Profiler
-	templateCache       map[string]*template.Template
-	jqCache             map[string]*gojq.Code
 	mergeMutex          sync.Mutex // Protects concurrent merge operations
 }
 
@@ -157,19 +147,22 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		return nil, nil, err
 	}
 
-	errors := ValidateConfig(cfg)
-	if len(errors) != 0 {
-		return nil, errors, fmt.Errorf("validation failed")
+	// Use ValidateAndCompile for fail-fast JQ/template compilation
+	compiled, validationErrors, err := ValidateAndCompile(cfg)
+	if err != nil {
+		return nil, validationErrors, err
+	}
+	if len(validationErrors) != 0 {
+		return nil, validationErrors, fmt.Errorf("validation failed")
 	}
 
 	c := &ApiCrawler{
-		httpClient:    http.DefaultClient,
-		Config:        cfg,
-		ContextMap:    map[string]*Context{},
-		logger:        NewNoopLogger(),
-		profiler:      nil,
-		templateCache: make(map[string]*template.Template),
-		jqCache:       make(map[string]*gojq.Code),
+		httpClient:     http.DefaultClient,
+		Config:         cfg,
+		CompiledConfig: compiled,
+		ContextMap:     map[string]*Context{},
+		logger:         NewNoopLogger(),
+		profiler:       nil,
 	}
 
 	// handle stream channel
@@ -201,105 +194,20 @@ func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
 	return a.profiler.Channel()
 }
 
-// getOrCompileTemplate retrieves a pre-compiled template from the cache,
-// or compiles, caches, and returns it if not found.
-func (a *ApiCrawler) getOrCompileTemplate(tmplString string) (*template.Template, error) {
-	if tmpl, ok := a.templateCache[tmplString]; ok {
-		return tmpl, nil
+// getCompiledStep returns the pre-compiled step for the given path.
+// Returns nil if no compiled config or step not found.
+func (a *ApiCrawler) getCompiledStep(stepPath string) *CompiledStep {
+	if a.CompiledConfig == nil {
+		return nil
 	}
-
-	tmpl, err := template.New("dynamic").Parse(tmplString)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing template: %w", err)
-	}
-
-	a.templateCache[tmplString] = tmpl
-	return tmpl, nil
+	return a.CompiledConfig.GetCompiledStep(stepPath)
 }
 
-// getOrCompileJQRule retrieves a pre-compiled JQ rule from the cache,
-// or compiles, caches, and returns it if not found.
-func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) (*gojq.Code, error) {
-	cacheKey := ruleString
-	if len(variables) > 0 {
-		// Use a unique key for rules with variables
-		// to avoid collisions with rules without variables.
-		cacheKey += fmt.Sprintf("$$vars:%v", variables)
-	}
-
-	if code, ok := a.jqCache[cacheKey]; ok {
-		return code, nil
-	}
-
-	query, err := gojq.Parse(ruleString)
-	if err != nil {
-		return nil, fmt.Errorf("invalid jq rule '%s': %w", ruleString, err)
-	}
-
-	code, err := gojq.Compile(query, gojq.WithVariables(variables))
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile jq rule: %w", err)
-	}
-
-	a.jqCache[cacheKey] = code
-	return code, nil
-}
-
-// expandTemplate expands a string using Go templates if it contains template markers.
-// Returns the original string if no template markers are found or on error.
-func (a *ApiCrawler) expandTemplate(s string, ctx map[string]any) (string, error) {
-	// Skip if no template markers - optimization to avoid unnecessary parsing
-	if !strings.Contains(s, "{{") {
-		return s, nil
-	}
-
-	tmpl, err := a.getOrCompileTemplate(s)
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, ctx); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
-}
-
-// expandBodyValue recursively expands template strings in body values.
-// Handles strings, maps, and slices. Other types are passed through unchanged.
-func (a *ApiCrawler) expandBodyValue(v any, ctx map[string]any) (any, error) {
-	switch val := v.(type) {
-	case string:
-		return a.expandTemplate(val, ctx)
-	case map[string]any:
-		result := make(map[string]any)
-		for k, v := range val {
-			expanded, err := a.expandBodyValue(v, ctx)
-			if err != nil {
-				return nil, fmt.Errorf("error expanding body key %s: %w", k, err)
-			}
-			result[k] = expanded
-		}
-		return result, nil
-	case []any:
-		result := make([]any, len(val))
-		for i, v := range val {
-			expanded, err := a.expandBodyValue(v, ctx)
-			if err != nil {
-				return nil, fmt.Errorf("error expanding body index %d: %w", i, err)
-			}
-			result[i] = expanded
-		}
-		return result, nil
-	default:
-		return val, nil
-	}
-}
-
-func newStepExecution(step Step, currentContextKey string, contextMap map[string]*Context, parentID string) *stepExecution {
+func (c *ApiCrawler) newStepExecution(step Step, stepPath string, currentContextKey string, contextMap map[string]*Context, parentID string) *stepExecution {
 	return &stepExecution{
 		step:              step,
+		stepPath:          stepPath,
+		compiledStep:      c.getCompiledStep(stepPath),
 		currentContextKey: currentContextKey,
 		contextMap:        contextMap,
 		currentContext:    contextMap[currentContextKey],
@@ -330,16 +238,16 @@ func (c *ApiCrawler) Run(ctx context.Context, vars map[string]any) error {
 	currentContext := "root"
 
 	c.runVars = vars
-	defer func() {
-		c.runVars = map[string]any{}
-	}()
+	// Note: We don't reset c.runVars in defer because parallel goroutines might still be
+	// reading it when Run() returns (especially on error). It will be overwritten on next Run().
 
 	// Emit ROOT_START event
 	rootID := c.profiler.EmitRootStart(c.Config, c.ContextMap)
 
-	for _, step := range c.Config.Steps {
-		ecxec := newStepExecution(step, currentContext, c.ContextMap, rootID)
-		if err := c.ExecuteStep(ctx, ecxec); err != nil {
+	for i, step := range c.Config.Steps {
+		stepPath := fmt.Sprintf("steps[%d]", i)
+		exec := c.newStepExecution(step, stepPath, currentContext, c.ContextMap, rootID)
+		if err := c.ExecuteStep(ctx, exec); err != nil {
 			return err
 		}
 	}
@@ -372,7 +280,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	stepStartTime := time.Now()
 	stepID := c.profiler.EmitRequestStepStart(exec.step, exec.parentID)
 
-	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
+	templateCtx := c.contextMapToTemplate(exec.contextMap, c.runVars)
 
 	// Determine authenticator (request-specific overrides global)
 	authenticator := c.globalAuthenticator
@@ -426,9 +334,10 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			queryParams:    next.QueryParams,
 			nextPageURL:    next.NextPageUrl,
 			authenticator:  authenticator,
+			compiledStep:   exec.compiledStep,
 		}
 
-		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx, c.Config.Headers)
+		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx)
 		if err != nil {
 			c.profiler.EmitError("Prepare Request Error", pageID, err.Error())
 			return err
@@ -590,7 +499,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		}
 
 		// Transform response
-		transformed, err := c.transformResult(raw, exec.step.ResultTransformer, templateCtx)
+		transformed, err := exec.compiledStep.ExecuteResultTransformer(raw, templateCtx)
 		if err != nil {
 			c.profiler.EmitError("Response Transform Error", pageID, err.Error())
 			return err
@@ -612,8 +521,9 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			c.profiler.EmitContextSelection(pageID, exec.step, workingContextKey, childContextMap)
 		}
 
-		for _, step := range exec.step.Steps {
-			newExec := newStepExecution(step, workingContextKey, childContextMap, pageID)
+		for i, step := range exec.step.Steps {
+			nestedPath := fmt.Sprintf("%s.steps[%d]", exec.stepPath, i)
+			newExec := c.newStepExecution(step, nestedPath, workingContextKey, childContextMap, pageID)
 			if err := c.ExecuteStep(ctx, newExec); err != nil {
 				return err
 			}
@@ -622,61 +532,21 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		// Get final result after nested steps from the working context
 		transformed = childContextMap[workingContextKey].Data
 
-		// Apply merge strategy
-		mergeOp := mergeOperation{
-			step:            exec.step,
-			currentContext:  exec.currentContext,
-			contextMap:      exec.contextMap,
-			result:          transformed,
-			templateContext: templateCtx,
-		}
-
-		// Capture data before merge (only if profiling)
-		dataBefore := c.profiler.CaptureContextDataBefore(exec.currentContext)
-
-		mergeStepName, err := c.performMerge(mergeOp)
-		if err != nil {
+		// Apply merge strategy (profiling is handled internally)
+		if err := c.performMerge(exec, transformed, templateCtx, pageID); err != nil {
 			c.profiler.EmitError("Merge Error", pageID, err.Error())
 			return err
 		}
 
-		// Emit CONTEXT_MERGE event if merge happened
-		if mergeStepName != "" && c.profiler.Enabled() {
-			// Determine merge rule and target context
-			mergeRule := ""
-			currentContextKey := exec.currentContext.key
-			targetContextKey := exec.currentContext.key
-
-			if exec.step.MergeOn != "" {
-				mergeRule = exec.step.MergeOn
-			} else if exec.step.MergeWithParentOn != "" {
-				mergeRule = exec.step.MergeWithParentOn
-				targetContextKey = exec.currentContext.ParentContext
-			} else if exec.step.MergeWithContext != nil {
-				mergeRule = exec.step.MergeWithContext.Rule
-				targetContextKey = exec.step.MergeWithContext.Name
-			}
-
-			dataAfter := c.profiler.CaptureContextDataAfter(exec.currentContext)
-
-			c.profiler.EmitContextMerge(pageID, exec.step, MergeEventData{
-				CurrentContextKey:   currentContextKey,
-				TargetContextKey:    targetContextKey,
-				MergeRule:           mergeRule,
-				TargetContextBefore: dataBefore,
-				TargetContextAfter:  dataAfter,
-				ContextMap:          exec.contextMap,
-			})
-		}
-
 		// Handle streaming at root level
 		if exec.currentContext.depth == 0 && c.Config.Stream {
-			array_data := exec.currentContext.Data.([]interface{})
-			for i, d := range array_data {
-				c.DataStream <- d
-				c.profiler.EmitStreamResult(pageID, exec.step, d, i)
+			if arrayData, ok := exec.currentContext.Data.([]interface{}); ok {
+				for i, d := range arrayData {
+					c.DataStream <- d
+					c.profiler.EmitStreamResult(pageID, exec.step, d, i)
+				}
+				exec.currentContext.Data = []interface{}{}
 			}
-			exec.currentContext.Data = []interface{}{}
 		}
 
 		// Emit REQUEST_PAGE_END event
@@ -715,8 +585,9 @@ func (c *ApiCrawler) executeForEachIteration(
 	itemID := c.profiler.EmitItemSelectionWithWorker(stepID, exec.step, index, item, exec.step.As, childContextMap[exec.step.As].Data, workerID, workerPoolID)
 
 	// Execute nested steps
-	for _, nested := range exec.step.Steps {
-		newExec := newStepExecution(nested, exec.step.As, childContextMap, itemID)
+	for i, nested := range exec.step.Steps {
+		nestedPath := fmt.Sprintf("%s.steps[%d]", exec.stepPath, i)
+		newExec := c.newStepExecution(nested, nestedPath, exec.step.As, childContextMap, itemID)
 		if err := c.ExecuteStep(ctx, newExec); err != nil {
 			result.err = err
 			return result
@@ -825,40 +696,19 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	stepID := c.profiler.EmitForEachStepStart(exec.step, exec.parentID)
 
 	results := []interface{}{}
+	var err error
 
 	// Extract items to iterate over from path (forEach always uses path, validation ensures this)
-	if len(exec.step.Path) != 0 {
-		c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
+	c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
 
-		code, err := c.getOrCompileJQRule(exec.step.Path)
-		if err != nil {
-			c.profiler.EmitError("Path Extraction Error", stepID, err.Error())
-			return fmt.Errorf("failed to get/compile jq path: %w", err)
-		}
-
-		iter := code.Run(exec.currentContext.Data)
-		for {
-			v, ok := iter.Next()
-			if !ok {
-				break
-			}
-			if err, isErr := v.(error); isErr {
-				return fmt.Errorf("jq error: %w", err)
-			}
-			results = append(results, v)
-		}
-
-		// Make sure the result is an array (jq might emit one-by-one items)
-		if len(results) == 1 {
-			if arr, ok := results[0].([]interface{}); ok {
-				results = arr
-			}
-		}
+	results, err = exec.compiledStep.ExecutePathExtractor(exec.currentContext.Data)
+	if err != nil {
+		c.profiler.EmitError("Path Extraction Error", stepID, err.Error())
+		return fmt.Errorf("path extraction failed: %w", err)
 	}
 
 	// Determine execution mode and parameters
 	var executionResults []interface{}
-	var err error
 
 	if exec.step.Parallelism != nil {
 		// Determine max concurrency (step setting or default)
@@ -929,8 +779,9 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 			// Emit ITEM_SELECTION event
 			itemID := c.profiler.EmitItemSelection(stepID, exec.step, i, item, exec.step.As, childContextMap[exec.step.As].Data)
 
-			for _, nested := range exec.step.Steps {
-				newExec := newStepExecution(nested, exec.step.As, childContextMap, itemID)
+			for j, nested := range exec.step.Steps {
+				nestedPath := fmt.Sprintf("%s.steps[%d]", exec.stepPath, j)
+				newExec := c.newStepExecution(nested, nestedPath, exec.step.As, childContextMap, itemID)
 				if err := c.ExecuteStep(ctx, newExec); err != nil {
 					return err
 				}
@@ -941,58 +792,42 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	}
 
 	// Determine merge strategy
-	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
+	templateCtx := c.contextMapToTemplate(exec.contextMap, c.runVars)
 
-	// Check if custom merge rules are specified
-	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil || exec.step.NoopMerge
+	// Check if custom merge rules are specified (compiled merge exists)
+	hasCustomMerge := exec.compiledStep.Merge != nil || exec.step.NoopMerge
 
 	if hasCustomMerge {
 		// Use custom merge logic (same as request steps)
-		mergeOp := mergeOperation{
-			step:            exec.step,
-			currentContext:  exec.currentContext,
-			contextMap:      exec.contextMap,
-			result:          executionResults,
-			templateContext: templateCtx,
-		}
-
-		_, err := c.performMerge(mergeOp)
-		if err != nil {
+		if err := c.performMerge(exec, executionResults, templateCtx, stepID); err != nil {
 			c.profiler.EmitError("Merge Error", stepID, err.Error())
 			return err
 		}
-
 	} else /*if exec.step.Path != ""*/ {
 		// Default: patch the array at exec.step.Path with new results
-		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
-		if err != nil {
-			c.profiler.EmitError("Merge Error", stepID, err.Error())
-			return fmt.Errorf("failed to get/compile merge rule: %w", err)
+		if exec.compiledStep == nil || exec.compiledStep.SyntheticMerge == nil {
+			c.profiler.EmitError("Merge Error", stepID, "synthetic merge not compiled")
+			return fmt.Errorf("synthetic merge not compiled for step")
 		}
 
-		iter := code.Run(exec.currentContext.Data, executionResults)
-
-		v, ok := iter.Next()
-		if !ok {
-			return fmt.Errorf("patch yielded nothing")
-		}
-		if err, isErr := v.(error); isErr {
-			return err
+		mergedData, mergeErr := exec.compiledStep.ExecuteSyntheticMerge(exec.currentContext.Data, executionResults)
+		if mergeErr != nil {
+			c.profiler.EmitError("Merge Error", stepID, mergeErr.Error())
+			return fmt.Errorf("synthetic merge failed: %w", mergeErr)
 		}
 
-		exec.currentContext.Data = v
+		exec.currentContext.Data = mergedData
 	}
-	// If Path is empty (using values) and no custom merge, skip merge
-	// The nested steps are expected to handle merging
 
 	// Handle streaming at root level
 	if exec.currentContext.depth <= 1 && c.Config.Stream {
-		array_data := exec.currentContext.Data.([]interface{})
-		for i, d := range array_data {
-			c.DataStream <- d
-			c.profiler.EmitStreamResult(stepID, exec.step, d, i)
+		if arrayData, ok := exec.currentContext.Data.([]interface{}); ok {
+			for i, d := range arrayData {
+				c.DataStream <- d
+				c.profiler.EmitStreamResult(stepID, exec.step, d, i)
+			}
+			exec.currentContext.Data = []interface{}{}
 		}
-		exec.currentContext.Data = []interface{}{}
 	}
 
 	// Emit FOREACH_STEP_END event
@@ -1037,8 +872,9 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 
 		// Execute nested steps with overlay context
 		// Nested steps operate in parent context but have access to the value via 'as' key
-		for _, nested := range exec.step.Steps {
-			newExec := newStepExecution(nested, exec.currentContextKey, childContextMap, itemID)
+		for j, nested := range exec.step.Steps {
+			nestedPath := fmt.Sprintf("%s.steps[%d]", exec.stepPath, j)
+			newExec := c.newStepExecution(nested, nestedPath, exec.currentContextKey, childContextMap, itemID)
 			if err := c.ExecuteStep(ctx, newExec); err != nil {
 				return err
 			}
@@ -1051,113 +887,105 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 	return nil
 }
 
-func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, templateCtx map[string]any) (interface{}, error) {
-	// Parse the JQ expression
-	code, err := c.getOrCompileJQRule(rule, JQ_RES_KEY, JQ_CTX_KEY)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
-	}
-
-	// Run the query against contextData, passing $res as a variable
-	iter := code.Run(contextData, result, templateCtx)
-
-	// Collect the results, expecting exactly one
-	var values []interface{}
-	for {
-		v, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if errVal, isErr := v.(error); isErr {
-			return nil, fmt.Errorf("error running JQ: %w", errVal)
-		}
-		values = append(values, v)
-	}
-
-	// Enforce exactly one result
-	if len(values) != 1 {
-		return nil, fmt.Errorf("merge rule must produce exactly one result, got %d", len(values))
-	}
-
-	return values[0], nil
-}
-
-// performMerge applies the appropriate merge strategy based on step configuration
-// Returns the profiler step name and error if any. The actual context is modified in place.
+// performMerge applies the appropriate merge strategy based on step configuration.
+// Handles profiling internally (captures before/after state and emits events).
 // Thread-safe: Uses mutex to protect concurrent access to contexts.
-func (c *ApiCrawler) performMerge(op mergeOperation) (profilerStepName string, err error) {
-	// Lock for thread-safe merge operations
-	c.mergeMutex.Lock()
-	defer c.mergeMutex.Unlock()
-
+func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx map[string]any, pageID string) error {
 	// Check for noop merge (skip merging entirely)
-	if op.step.NoopMerge {
+	if exec.step.NoopMerge {
 		c.logger.Debug("[Merge] noop merge - skipping")
-		return "", nil
+		return nil
 	}
 
-	// 1. Explicit merge rule (merge with ancestor context)
-	if op.step.MergeOn != "" {
-		c.logger.Debug("[Merge] merging-on with expression: %s", op.step.MergeOn)
-		updated, err := applyMergeRule(c, op.currentContext.Data, op.step.MergeOn, op.result, op.templateContext)
-		if err != nil {
-			return "", fmt.Errorf("mergeOn failed: %w", err)
-		}
-		op.currentContext.Data = updated
-		return "Merge-On", nil
+	merge := exec.compiledStep.Merge
+
+	// Capture data before merge (for profiling)
+	var dataBefore any = nil
+	if c.profiler.Enabled() {
+		c.profiler.CaptureContextDataBefore(exec.currentContext)
 	}
+	mergeRule := "(default)"
+	targetContextKey := exec.currentContext.key
 
-	// 2. Merge with parent context
-	if op.step.MergeWithParentOn != "" {
-		c.logger.Debug("[Merge] merging-with-parent with expression: %s", op.step.MergeWithParentOn)
-		parentCtx := op.contextMap[op.currentContext.ParentContext]
-		updated, err := applyMergeRule(c, parentCtx.Data, op.step.MergeWithParentOn, op.result, op.templateContext)
-		if err != nil {
-			return "", fmt.Errorf("mergeWithParentOn failed: %w", err)
+	// If there's a compiled merge rule, use unified merge path
+	if merge != nil && merge.Rule != nil {
+		// Resolve target context
+		var targetCtx *Context
+
+		switch merge.Target {
+		case MergeTargetCurrent:
+			targetCtx = exec.currentContext
+			targetContextKey = exec.currentContext.key
+			c.logger.Debug("[Merge] merging to current context with expression: %s", merge.SourceRule)
+		case MergeTargetParent:
+			targetCtx = exec.contextMap[exec.currentContext.ParentContext]
+			targetContextKey = exec.currentContext.ParentContext
+			c.logger.Debug("[Merge] merging to parent context with expression: %s", merge.SourceRule)
+		case MergeTargetNamed:
+			var ok bool
+			targetCtx, ok = exec.contextMap[merge.TargetName]
+			if !ok {
+				return fmt.Errorf("context '%s' not found", merge.TargetName)
+			}
+			targetContextKey = merge.TargetName
+			c.logger.Debug("[Merge] merging to named context '%s' with expression: %s", merge.TargetName, merge.SourceRule)
 		}
-		parentCtx.Data = updated
-		return "Merge-Parent", nil
-	}
 
-	// 3. Named context merge (cross-scope update)
-	// Note: Since childMapWithClonedContext now uses unique working keys for
-	// canonical contexts (like "root"), the original canonical contexts are
-	// preserved in the context map and can be found by name.
-	if op.step.MergeWithContext != nil {
-		c.logger.Debug("[Merge] merging-with-context with expression: %s:%s",
-			op.step.MergeWithContext.Name, op.step.MergeWithContext.Rule)
-
-		targetCtx, ok := op.contextMap[op.step.MergeWithContext.Name]
-		if !ok {
-			return "", fmt.Errorf("context '%s' not found", op.step.MergeWithContext.Name)
+		if targetCtx == nil {
+			return fmt.Errorf("merge target context is nil")
 		}
-		updated, err := applyMergeRule(c, targetCtx.Data, op.step.MergeWithContext.Rule, op.result, op.templateContext)
+
+		// Execute merge with mutex protection
+		c.mergeMutex.Lock()
+		defer c.mergeMutex.Unlock()
+		updated, err := merge.Rule.RunSingle(targetCtx.Data, result, templateCtx)
 		if err != nil {
-			return "", fmt.Errorf("mergeWithContext failed: %w", err)
+			return fmt.Errorf("merge failed: %w", err)
 		}
 		targetCtx.Data = updated
-		return "Merge-Context", nil
+		mergeRule = merge.SourceRule
+
+	} else {
+		// Default merge (shallow merge for maps/arrays) - no explicit rule
+		c.logger.Debug("[Merge] default merge")
+
+		c.mergeMutex.Lock()
+		defer c.mergeMutex.Unlock()
+
+		switch data := exec.currentContext.Data.(type) {
+		case []interface{}:
+			if resultArr, ok := result.([]interface{}); ok {
+				exec.currentContext.Data = append(data, resultArr...)
+			}
+		case map[string]interface{}:
+			if resultMap, ok := result.(map[string]interface{}); ok {
+				for k, v := range resultMap {
+					data[k] = v
+				}
+			}
+		default:
+			exec.currentContext.Data = result
+		}
 	}
 
-	// 4. Default merge (shallow merge for maps/arrays)
-	c.logger.Debug("[Merge] default merge")
-	switch data := op.currentContext.Data.(type) {
-	case []interface{}:
-		op.currentContext.Data = append(data, op.result.([]interface{})...)
-	case map[string]interface{}:
-		if transformedMap, ok := op.result.(map[string]interface{}); ok {
-			for k, v := range transformedMap {
-				data[k] = v
-			}
-		}
-	default:
-		op.currentContext.Data = op.result
+	// Emit profiler event for default merge
+	if c.profiler.Enabled() {
+		dataAfter := c.profiler.CaptureContextDataAfter(exec.currentContext)
+		c.profiler.EmitContextMerge(pageID, exec.step, MergeEventData{
+			CurrentContextKey:   exec.currentContext.key,
+			TargetContextKey:    targetContextKey,
+			MergeRule:           mergeRule,
+			TargetContextBefore: dataBefore,
+			TargetContextAfter:  dataAfter,
+			ContextMap:          exec.contextMap,
+		})
 	}
-	return "Merge-Default", nil
+
+	return nil
 }
 
 // prepareHTTPRequest builds an HTTP request from the context and pagination parameters
-func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[string]any, globalHeaders map[string]string) (*http.Request, *url.URL, error) {
+func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[string]any) (*http.Request, *url.URL, error) {
 	var urlObj *url.URL
 	var err error
 
@@ -1169,19 +997,14 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		}
 	} else {
 		// Template URL expansion
-		tmpl, err := c.getOrCompileTemplate(ctx.urlTemplate)
+		expandedURL, err := ctx.compiledStep.ExecuteURLTemplate(templateCtx, ctx.urlTemplate)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error getting/compiling URL template: %w", err)
-		}
-
-		var urlBuf bytes.Buffer
-		if err := tmpl.Execute(&urlBuf, templateCtx); err != nil {
 			return nil, nil, fmt.Errorf("error executing URL template: %w", err)
 		}
 
-		urlObj, err = url.Parse(urlBuf.String())
+		urlObj, err = url.Parse(expandedURL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid URL %s: %w", urlBuf.String(), err)
+			return nil, nil, fmt.Errorf("invalid URL %s: %w", expandedURL, err)
 		}
 	}
 
@@ -1192,22 +1015,28 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 	urlObj.RawQuery = query.Encode()
 
-	// Merge configured body with pagination body params, expanding templates
+	// Merge configured body with pagination body params
 	mergedBody := make(map[string]any)
-	for k, v := range ctx.configuredBody {
-		expanded, err := c.expandBodyValue(v, templateCtx)
+
+	// Configured body: use pre-compiled templates if available, else use raw values
+	if ctx.compiledStep != nil && ctx.compiledStep.BodyTemplates != nil {
+		expandedBody, err := ctx.compiledStep.ExecuteBodyTemplates(templateCtx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error expanding body field %s: %w", k, err)
+			return nil, nil, fmt.Errorf("error expanding body: %w", err)
 		}
-		mergedBody[k] = expanded
+		for k, v := range expandedBody {
+			mergedBody[k] = v
+		}
+	} else {
+		// No templates in body, use raw values
+		for k, v := range ctx.configuredBody {
+			mergedBody[k] = v
+		}
 	}
+
+	// Add pagination body params (dynamic, use raw values - pagination doesn't use templates)
 	for k, v := range ctx.bodyParams {
-		// Pagination body params are typically not templated, but expand just in case
-		expanded, err := c.expandBodyValue(v, templateCtx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error expanding pagination body field %s: %w", k, err)
-		}
-		mergedBody[k] = expanded
+		mergedBody[k] = v
 	}
 
 	// Determine content type
@@ -1242,21 +1071,38 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		return nil, nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}
 
-	// Apply headers with template expansion (priority: global < request-specific < pagination)
+	// Apply headers (priority: global < request-specific)
 	// Use direct map assignment to preserve exact header casing (Set() canonicalizes)
-	for k, v := range globalHeaders {
-		expanded, err := c.expandTemplate(v, templateCtx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error expanding global header %s: %w", k, err)
-		}
-		req.Header[k] = []string{expanded}
+	// Use pre-compiled global headers
+	expandedGlobalHeaders, err := c.CompiledConfig.ExecuteGlobalHeaders(templateCtx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error expanding global headers: %w", err)
 	}
+	for k, v := range expandedGlobalHeaders {
+		req.Header[k] = []string{v}
+	}
+
+	// Request-specific headers: use pre-compiled templates for templated headers,
+	// raw values for non-templated headers
+	// Execute pre-compiled header templates
+	expandedHeaders, err := ctx.compiledStep.ExecuteHeaderTemplates(templateCtx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error expanding headers: %w", err)
+	}
+	for k, v := range expandedHeaders {
+		req.Header[k] = []string{v}
+	}
+
+	// Add headers without templates (use raw values)
 	for k, v := range ctx.headers {
-		expanded, err := c.expandTemplate(v, templateCtx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error expanding header %s: %w", k, err)
+		if ctx.compiledStep == nil || ctx.compiledStep.HeaderTemplates == nil {
+			// No compiled templates at all, use raw value
+			req.Header[k] = []string{v}
+		} else if _, hasCompiled := ctx.compiledStep.HeaderTemplates[k]; !hasCompiled {
+			// This header wasn't compiled (no template markers), use raw value
+			req.Header[k] = []string{v}
 		}
-		req.Header[k] = []string{expanded}
+		// If header was compiled, it was already set above
 	}
 
 	// Set Content-Type header if body is present
@@ -1268,42 +1114,6 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	ctx.authenticator.PrepareRequest(req, ctx.requestID)
 
 	return req, urlObj, nil
-}
-
-// transformResult applies the jq transformer to the raw response
-func (c *ApiCrawler) transformResult(raw any, transformer string, templateCtx map[string]any) (any, error) {
-	if transformer == "" {
-		return raw, nil
-	}
-
-	c.logger.Debug("[Transform] transforming with expression: %s", transformer)
-
-	code, err := c.getOrCompileJQRule(transformer, JQ_CTX_KEY)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get/compile transform rule: %w", err)
-	}
-
-	iter := code.Run(raw, templateCtx)
-	var singleResult interface{}
-	count := 0
-
-	for {
-		v, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if err, isErr := v.(error); isErr {
-			return nil, fmt.Errorf("jq error: %w", err)
-		}
-
-		count++
-		if count > 1 {
-			return nil, fmt.Errorf("resultTransformer yielded more than one value")
-		}
-
-		singleResult = v
-	}
-	return singleResult, nil
 }
 
 func childMapWith(base map[string]*Context, currentCotnext *Context, key string, value interface{}) map[string]*Context {
@@ -1380,23 +1190,29 @@ func childMapWithClonedContext(base map[string]*Context, currentContext *Context
 	}
 }
 
-func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[string]interface{} {
+// contextMapToTemplate creates a template context from the context map.
+// Thread-safe: acquires mergeMutex to prevent races with concurrent merge operations.
+// Also normalizes numeric values to avoid scientific notation in templates.
+func (c *ApiCrawler) contextMapToTemplate(base map[string]*Context, vars map[string]any) map[string]interface{} {
+	// Acquire lock to prevent races with merge operations
+	c.mergeMutex.Lock()
+
 	result := make(map[string]interface{})
 
-	// First pass: add all contexts by their key
-	for k, c := range base {
-		result[k] = c.Data
+	// First pass: add all contexts by their key (deep copy + normalize in one pass)
+	for k, ctx := range base {
+		result[k] = deepCopyAndNormalizeValue(ctx.Data)
 	}
 
 	// Second pass: spread map data from special contexts into top level
 	// This allows templates to access fields directly (e.g., {{ .FacilityId }})
 	// Priority: _response_* contexts first (most specific), then root
-	for k, c := range base {
+	for k, ctx := range base {
 		// Spread _response_* context data (working contexts from request steps)
 		if len(k) > 10 && k[:10] == "_response_" {
-			if dataMap, ok := c.Data.(map[string]interface{}); ok {
+			if dataMap, ok := ctx.Data.(map[string]interface{}); ok {
 				for field, v := range dataMap {
-					result[field] = v
+					result[field] = deepCopyAndNormalizeValue(v)
 				}
 			}
 		}
@@ -1407,25 +1223,28 @@ func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[str
 		if rootMap, ok := rootCtx.Data.(map[string]interface{}); ok {
 			for k, v := range rootMap {
 				if _, exists := result[k]; !exists {
-					result[k] = v
+					result[k] = deepCopyAndNormalizeValue(v)
 				}
 			}
 		}
 	}
 
+	c.mergeMutex.Unlock()
+
 	// Last: inject runtime variables at root level (highest priority, overrides everything)
 	// This allows {{ .varName }} to resolve directly to the runtime variable
+	// No need to lock for vars since they are read-only during execution
+	// Normalize values to avoid scientific notation in templates
 	for k, v := range vars {
-		result[k] = v
+		result[k] = deepCopyAndNormalizeValue(v)
 	}
 
-	// Normalize float64 whole numbers to int64 to avoid scientific notation in templates
-	return normalizeTemplateValues(result).(map[string]interface{})
+	return result
 }
 
-// normalizeTemplateValues recursively normalizes numeric values to prevent
-// scientific notation when rendering in templates (e.g., 100024999 instead of 1.00025e+08)
-func normalizeTemplateValues(v any) any {
+// deepCopyAndNormalizeValue recursively deep copies a value while normalizing floats.
+// Used for template rendering to avoid scientific notation (e.g., 100024999 instead of 1.00025e+08)
+func deepCopyAndNormalizeValue(v any) any {
 	switch val := v.(type) {
 	case float64:
 		// Check if float64 is a whole number (no fractional part)
@@ -1433,21 +1252,24 @@ func normalizeTemplateValues(v any) any {
 			return int64(val)
 		}
 		// For floats with decimals, convert to string to avoid scientific notation
-		// Use 'f' format with -1 precision (minimum digits needed)
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case map[string]interface{}:
-		result := make(map[string]interface{})
+		result := make(map[string]interface{}, len(val))
 		for k, v := range val {
-			result[k] = normalizeTemplateValues(v)
+			result[k] = deepCopyAndNormalizeValue(v)
 		}
 		return result
 	case []interface{}:
 		result := make([]interface{}, len(val))
 		for i, v := range val {
-			result[i] = normalizeTemplateValues(v)
+			result[i] = deepCopyAndNormalizeValue(v)
 		}
 		return result
+	case string, int, int64, int32, bool, nil:
+		// Immutable types, safe to return as-is
+		return val
 	default:
+		// For other types, return as-is (they should be immutable or not shared)
 		return val
 	}
 }

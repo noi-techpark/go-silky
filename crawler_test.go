@@ -206,17 +206,24 @@ func TestPaginatedIncrementStream(t *testing.T) {
 	craw.SetClient(client)
 
 	stream := craw.GetDataStream()
-	defer close(stream)
 	data := make([]interface{}, 0)
+	done := make(chan struct{})
 
 	go func() {
 		for d := range stream {
 			data = append(data, d)
 		}
+		close(done)
 	}()
 
 	err := craw.Run(context.TODO(), nil)
 	require.Nil(t, err)
+
+	// Close the stream to signal the goroutine to finish (crawler doesn't close it)
+	close(stream)
+
+	// Wait for the goroutine to finish reading all stream data
+	<-done
 
 	var expected interface{}
 	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/paginated_increment_stream/output.json")

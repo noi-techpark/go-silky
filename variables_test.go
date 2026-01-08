@@ -160,14 +160,18 @@ func TestVariablesComplex(t *testing.T) {
 		},
 	}
 
-	// Just verify the contextMapToTemplate function handles complex vars
+	// Create a minimal crawler to test the contextMapToTemplate method
+	craw, _, err := NewApiCrawler("testdata/crawler/variables/config.yaml")
+	require.Nil(t, err)
+
+	// Set up test context map
 	contextMap := map[string]*Context{
 		"root": {
 			Data: map[string]interface{}{},
 		},
 	}
 
-	result := contextMapToTemplate(contextMap, vars)
+	result := craw.contextMapToTemplate(contextMap, vars)
 
 	// Verify complex vars are accessible
 	auth, ok := result["auth"].(map[string]any)

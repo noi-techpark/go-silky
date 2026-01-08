@@ -441,3 +441,34 @@ func validatePaginationStop(stop StopCondition, location string) []ValidationErr
 
 	return errs
 }
+
+// ValidateAndCompile performs both structural validation and cold-start compilation.
+// This is the preferred entry point for production use as it:
+// 1. Validates the configuration structure
+// 2. Pre-compiles all JQ expressions and templates (fail-fast)
+// 3. Builds the execution topology
+//
+// Returns the compiled config if successful, or validation errors if any step fails.
+func ValidateAndCompile(cfg Config) (*CompiledConfig, []ValidationError, error) {
+	// Phase 1: Structural validation (existing logic)
+	errs := ValidateConfig(cfg)
+	if len(errs) > 0 {
+		return nil, errs, nil
+	}
+
+	// Phase 2: Compile all expressions
+	compiled, compileErr := CompileConfig(cfg)
+	if compileErr != nil {
+		// Convert compilation error to validation error
+		errs = append(errs, ValidationError{
+			Message:  compileErr.Error(),
+			Location: "compilation",
+		})
+		return nil, errs, nil
+	}
+
+	// Phase 3: Build topology
+	compiled.Topology = BuildTopology(cfg)
+
+	return compiled, nil, nil
+}
