@@ -899,10 +899,14 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 
 	merge := exec.compiledStep.Merge
 
+	// Execute merge with mutex protection
+	c.mergeMutex.Lock()
+	defer c.mergeMutex.Unlock()
+
 	// Capture data before merge (for profiling)
 	var dataBefore any = nil
 	if c.profiler.Enabled() {
-		c.profiler.CaptureContextDataBefore(exec.currentContext)
+		dataBefore = copyDataSafe(exec.currentContext)
 	}
 	mergeRule := "(default)"
 	targetContextKey := exec.currentContext.key
@@ -935,9 +939,6 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 			return fmt.Errorf("merge target context is nil")
 		}
 
-		// Execute merge with mutex protection
-		c.mergeMutex.Lock()
-		defer c.mergeMutex.Unlock()
 		updated, err := merge.Rule.RunSingle(targetCtx.Data, result, templateCtx)
 		if err != nil {
 			return fmt.Errorf("merge failed: %w", err)
@@ -948,9 +949,6 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 	} else {
 		// Default merge (shallow merge for maps/arrays) - no explicit rule
 		c.logger.Debug("[Merge] default merge")
-
-		c.mergeMutex.Lock()
-		defer c.mergeMutex.Unlock()
 
 		switch data := exec.currentContext.Data.(type) {
 		case []interface{}:
@@ -970,7 +968,7 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 
 	// Emit profiler event for default merge
 	if c.profiler.Enabled() {
-		dataAfter := c.profiler.CaptureContextDataAfter(exec.currentContext)
+		dataAfter := copyDataSafe(exec.currentContext)
 		c.profiler.EmitContextMerge(pageID, exec.step, MergeEventData{
 			CurrentContextKey:   exec.currentContext.key,
 			TargetContextKey:    targetContextKey,

@@ -431,6 +431,7 @@ type MergeEventData struct {
 }
 
 // EmitContextMerge emits context merge event
+// NOT THREAD SAFE
 func (p *Profiler) EmitContextMerge(pageID string, step Step, data MergeEventData) {
 	if !p.Enabled() {
 		return
@@ -443,7 +444,7 @@ func (p *Profiler) EmitContextMerge(pageID string, step Step, data MergeEventDat
 		"mergeRule":           data.MergeRule,
 		"targetContextBefore": data.TargetContextBefore,
 		"targetContextAfter":  data.TargetContextAfter,
-		"fullContextMap":      p.serializeContextMapSafe(data.ContextMap),
+		"fullContextMap":      serializeContextMap(data.ContextMap),
 	}
 	p.emit(event)
 }
@@ -656,28 +657,6 @@ func (p *Profiler) EmitError(name string, parentID string, err string) {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-// CaptureContextDataBefore captures context data before a merge operation
-// Returns nil if profiling is disabled
-func (p *Profiler) CaptureContextDataBefore(ctx *Context) any {
-	if !p.Enabled() {
-		return nil
-	}
-	p.mergeMutex.Lock()
-	defer p.mergeMutex.Unlock()
-	return copyDataSafe(ctx.Data)
-}
-
-// CaptureContextDataAfter captures context data after a merge operation
-// Returns nil if profiling is disabled
-func (p *Profiler) CaptureContextDataAfter(ctx *Context) any {
-	if !p.Enabled() {
-		return nil
-	}
-	p.mergeMutex.Lock()
-	defer p.mergeMutex.Unlock()
-	return copyDataSafe(ctx.Data)
-}
 
 // serializeContextMap converts a context map to a safe serializable format
 func serializeContextMap(contextMap map[string]*Context) map[string]any {
