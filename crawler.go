@@ -133,6 +133,7 @@ type forEachResult struct {
 
 type ApiCrawler struct {
 	Config              Config
+	CompiledConfig      *CompiledConfig // Pre-compiled JQ/templates (nil for legacy mode)
 	ContextMap          map[string]*Context
 	globalAuthenticator Authenticator
 	DataStream          chan any
@@ -140,8 +141,6 @@ type ApiCrawler struct {
 	logger              Logger
 	httpClient          HTTPClient
 	profiler            *Profiler
-	templateCache       map[string]*template.Template
-	jqCache             map[string]*gojq.Code
 	mergeMutex          sync.Mutex // Protects concurrent merge operations
 }
 
@@ -157,19 +156,22 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		return nil, nil, err
 	}
 
-	errors := ValidateConfig(cfg)
-	if len(errors) != 0 {
-		return nil, errors, fmt.Errorf("validation failed")
+	// Use ValidateAndCompile for fail-fast JQ/template compilation
+	compiled, validationErrors, err := ValidateAndCompile(cfg)
+	if err != nil {
+		return nil, validationErrors, err
+	}
+	if len(validationErrors) != 0 {
+		return nil, validationErrors, fmt.Errorf("validation failed")
 	}
 
 	c := &ApiCrawler{
-		httpClient:    http.DefaultClient,
-		Config:        cfg,
-		ContextMap:    map[string]*Context{},
-		logger:        NewNoopLogger(),
-		profiler:      nil,
-		templateCache: make(map[string]*template.Template),
-		jqCache:       make(map[string]*gojq.Code),
+		httpClient:     http.DefaultClient,
+		Config:         cfg,
+		CompiledConfig: compiled,
+		ContextMap:     map[string]*Context{},
+		logger:         NewNoopLogger(),
+		profiler:       nil,
 	}
 
 	// handle stream channel
@@ -201,36 +203,21 @@ func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
 	return a.profiler.Channel()
 }
 
-// getOrCompileTemplate retrieves a pre-compiled template from the cache,
-// or compiles, caches, and returns it if not found.
-func (a *ApiCrawler) getOrCompileTemplate(tmplString string) (*template.Template, error) {
-	if tmpl, ok := a.templateCache[tmplString]; ok {
-		return tmpl, nil
-	}
-
+// compileTemplateFallback compiles a template at runtime.
+// This is a fallback for cases not covered by pre-compilation.
+// With ValidateAndCompile, all templates should be pre-compiled.
+func (a *ApiCrawler) compileTemplateFallback(tmplString string) (*template.Template, error) {
 	tmpl, err := template.New("dynamic").Parse(tmplString)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing template: %w", err)
 	}
-
-	a.templateCache[tmplString] = tmpl
 	return tmpl, nil
 }
 
-// getOrCompileJQRule retrieves a pre-compiled JQ rule from the cache,
-// or compiles, caches, and returns it if not found.
-func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) (*gojq.Code, error) {
-	cacheKey := ruleString
-	if len(variables) > 0 {
-		// Use a unique key for rules with variables
-		// to avoid collisions with rules without variables.
-		cacheKey += fmt.Sprintf("$$vars:%v", variables)
-	}
-
-	if code, ok := a.jqCache[cacheKey]; ok {
-		return code, nil
-	}
-
+// compileJQFallback compiles a JQ rule at runtime.
+// This is a fallback for cases not covered by pre-compilation.
+// With ValidateAndCompile, all JQ expressions should be pre-compiled.
+func (a *ApiCrawler) compileJQFallback(ruleString string, variables ...string) (*gojq.Code, error) {
 	query, err := gojq.Parse(ruleString)
 	if err != nil {
 		return nil, fmt.Errorf("invalid jq rule '%s': %w", ruleString, err)
@@ -241,8 +228,16 @@ func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) 
 		return nil, fmt.Errorf("failed to compile jq rule: %w", err)
 	}
 
-	a.jqCache[cacheKey] = code
 	return code, nil
+}
+
+// getCompiledStep returns the pre-compiled step for the given path.
+// Returns nil if no compiled config or step not found.
+func (a *ApiCrawler) getCompiledStep(stepPath string) *CompiledStep {
+	if a.CompiledConfig == nil {
+		return nil
+	}
+	return a.CompiledConfig.GetCompiledStep(stepPath)
 }
 
 // expandTemplate expands a string using Go templates if it contains template markers.
@@ -253,7 +248,7 @@ func (a *ApiCrawler) expandTemplate(s string, ctx map[string]any) (string, error
 		return s, nil
 	}
 
-	tmpl, err := a.getOrCompileTemplate(s)
+	tmpl, err := a.compileTemplateFallback(s)
 	if err != nil {
 		return "", err
 	}
@@ -330,9 +325,8 @@ func (c *ApiCrawler) Run(ctx context.Context, vars map[string]any) error {
 	currentContext := "root"
 
 	c.runVars = vars
-	defer func() {
-		c.runVars = map[string]any{}
-	}()
+	// Note: We don't reset c.runVars in defer because parallel goroutines might still be
+	// reading it when Run() returns (especially on error). It will be overwritten on next Run().
 
 	// Emit ROOT_START event
 	rootID := c.profiler.EmitRootStart(c.Config, c.ContextMap)
@@ -372,7 +366,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	stepStartTime := time.Now()
 	stepID := c.profiler.EmitRequestStepStart(exec.step, exec.parentID)
 
-	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
+	templateCtx := c.contextMapToTemplate(exec.contextMap, c.runVars)
 
 	// Determine authenticator (request-specific overrides global)
 	authenticator := c.globalAuthenticator
@@ -830,13 +824,15 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	if len(exec.step.Path) != 0 {
 		c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
 
-		code, err := c.getOrCompileJQRule(exec.step.Path)
+		code, err := c.compileJQFallback(exec.step.Path)
 		if err != nil {
 			c.profiler.EmitError("Path Extraction Error", stepID, err.Error())
-			return fmt.Errorf("failed to get/compile jq path: %w", err)
+			return fmt.Errorf("failed to compile jq path: %w", err)
 		}
 
-		iter := code.Run(exec.currentContext.Data)
+		// Deep copy context data before passing to jq to prevent race conditions
+		dataCopy := deepCopyValue(exec.currentContext.Data)
+		iter := code.Run(dataCopy)
 		for {
 			v, ok := iter.Next()
 			if !ok {
@@ -941,7 +937,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	}
 
 	// Determine merge strategy
-	templateCtx := contextMapToTemplate(exec.contextMap, c.runVars)
+	templateCtx := c.contextMapToTemplate(exec.contextMap, c.runVars)
 
 	// Check if custom merge rules are specified
 	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil || exec.step.NoopMerge
@@ -964,13 +960,15 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 	} else /*if exec.step.Path != ""*/ {
 		// Default: patch the array at exec.step.Path with new results
-		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
+		code, err := c.compileJQFallback(exec.step.Path+" = $new", "$new")
 		if err != nil {
 			c.profiler.EmitError("Merge Error", stepID, err.Error())
-			return fmt.Errorf("failed to get/compile merge rule: %w", err)
+			return fmt.Errorf("failed to compile merge rule: %w", err)
 		}
 
-		iter := code.Run(exec.currentContext.Data, executionResults)
+		// Deep copy context data before passing to jq to prevent race conditions
+		dataCopy := deepCopyValue(exec.currentContext.Data)
+		iter := code.Run(dataCopy, executionResults)
 
 		v, ok := iter.Next()
 		if !ok {
@@ -1053,13 +1051,17 @@ func (c *ApiCrawler) handleForValues(ctx context.Context, exec *stepExecution) e
 
 func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, templateCtx map[string]any) (interface{}, error) {
 	// Parse the JQ expression
-	code, err := c.getOrCompileJQRule(rule, JQ_RES_KEY, JQ_CTX_KEY)
+	code, err := c.compileJQFallback(rule, JQ_RES_KEY, JQ_CTX_KEY)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
+		return nil, fmt.Errorf("failed to compile merge rule: %w", err)
 	}
 
-	// Run the query against contextData, passing $res as a variable
-	iter := code.Run(contextData, result, templateCtx)
+	// Deep copy context data before passing to jq, as jq's normalizeNumbers modifies data in place
+	// This prevents race conditions when multiple goroutines access the same context data
+	dataCopy := deepCopyValue(contextData)
+
+	// Run the query against the copied data, passing $res as a variable
+	iter := code.Run(dataCopy, result, templateCtx)
 
 	// Collect the results, expecting exactly one
 	var values []interface{}
@@ -1169,9 +1171,9 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		}
 	} else {
 		// Template URL expansion
-		tmpl, err := c.getOrCompileTemplate(ctx.urlTemplate)
+		tmpl, err := c.compileTemplateFallback(ctx.urlTemplate)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error getting/compiling URL template: %w", err)
+			return nil, nil, fmt.Errorf("error compiling URL template: %w", err)
 		}
 
 		var urlBuf bytes.Buffer
@@ -1278,9 +1280,9 @@ func (c *ApiCrawler) transformResult(raw any, transformer string, templateCtx ma
 
 	c.logger.Debug("[Transform] transforming with expression: %s", transformer)
 
-	code, err := c.getOrCompileJQRule(transformer, JQ_CTX_KEY)
+	code, err := c.compileJQFallback(transformer, JQ_CTX_KEY)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get/compile transform rule: %w", err)
+		return nil, fmt.Errorf("failed to compile transform rule: %w", err)
 	}
 
 	iter := code.Run(raw, templateCtx)
@@ -1380,23 +1382,28 @@ func childMapWithClonedContext(base map[string]*Context, currentContext *Context
 	}
 }
 
-func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[string]interface{} {
+// contextMapToTemplate creates a template context from the context map.
+// Thread-safe: acquires mergeMutex to prevent races with concurrent merge operations.
+func (c *ApiCrawler) contextMapToTemplate(base map[string]*Context, vars map[string]any) map[string]interface{} {
+	// Acquire read lock to prevent races with merge operations
+	c.mergeMutex.Lock()
+
 	result := make(map[string]interface{})
 
-	// First pass: add all contexts by their key
-	for k, c := range base {
-		result[k] = c.Data
+	// First pass: add all contexts by their key (deep copy to prevent races)
+	for k, ctx := range base {
+		result[k] = deepCopyValue(ctx.Data)
 	}
 
 	// Second pass: spread map data from special contexts into top level
 	// This allows templates to access fields directly (e.g., {{ .FacilityId }})
 	// Priority: _response_* contexts first (most specific), then root
-	for k, c := range base {
+	for k, ctx := range base {
 		// Spread _response_* context data (working contexts from request steps)
 		if len(k) > 10 && k[:10] == "_response_" {
-			if dataMap, ok := c.Data.(map[string]interface{}); ok {
+			if dataMap, ok := ctx.Data.(map[string]interface{}); ok {
 				for field, v := range dataMap {
-					result[field] = v
+					result[field] = deepCopyValue(v)
 				}
 			}
 		}
@@ -1407,25 +1414,38 @@ func contextMapToTemplate(base map[string]*Context, vars map[string]any) map[str
 		if rootMap, ok := rootCtx.Data.(map[string]interface{}); ok {
 			for k, v := range rootMap {
 				if _, exists := result[k]; !exists {
-					result[k] = v
+					result[k] = deepCopyValue(v)
 				}
 			}
 		}
 	}
 
+	c.mergeMutex.Unlock()
+
 	// Last: inject runtime variables at root level (highest priority, overrides everything)
 	// This allows {{ .varName }} to resolve directly to the runtime variable
+	// No need to lock for vars since they are read-only during execution
 	for k, v := range vars {
 		result[k] = v
 	}
 
-	// Normalize float64 whole numbers to int64 to avoid scientific notation in templates
-	return normalizeTemplateValues(result).(map[string]interface{})
+	// Normalize numeric values to avoid scientific notation in templates
+	return deepCopyAndNormalize(result)
 }
 
-// normalizeTemplateValues recursively normalizes numeric values to prevent
-// scientific notation when rendering in templates (e.g., 100024999 instead of 1.00025e+08)
-func normalizeTemplateValues(v any) any {
+// deepCopyAndNormalize creates a deep copy of the map while normalizing numeric values.
+// This is used for template contexts to prevent scientific notation in rendered output.
+func deepCopyAndNormalize(m map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		result[k] = deepCopyAndNormalizeValue(v)
+	}
+	return result
+}
+
+// deepCopyAndNormalizeValue recursively deep copies a value while normalizing floats.
+// Used for template rendering to avoid scientific notation (e.g., 100024999 instead of 1.00025e+08)
+func deepCopyAndNormalizeValue(v any) any {
 	switch val := v.(type) {
 	case float64:
 		// Check if float64 is a whole number (no fractional part)
@@ -1433,21 +1453,49 @@ func normalizeTemplateValues(v any) any {
 			return int64(val)
 		}
 		// For floats with decimals, convert to string to avoid scientific notation
-		// Use 'f' format with -1 precision (minimum digits needed)
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case map[string]interface{}:
-		result := make(map[string]interface{})
+		result := make(map[string]interface{}, len(val))
 		for k, v := range val {
-			result[k] = normalizeTemplateValues(v)
+			result[k] = deepCopyAndNormalizeValue(v)
 		}
 		return result
 	case []interface{}:
 		result := make([]interface{}, len(val))
 		for i, v := range val {
-			result[i] = normalizeTemplateValues(v)
+			result[i] = deepCopyAndNormalizeValue(v)
 		}
 		return result
+	case string, int, int64, int32, bool, nil:
+		// Immutable types, safe to return as-is
+		return val
 	default:
+		// For other types, return as-is (they should be immutable or not shared)
+		return val
+	}
+}
+
+// deepCopyValue creates a pure deep copy of a value without type normalization.
+// Used for jq input to preserve original types and avoid race conditions.
+func deepCopyValue(v any) any {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(val))
+		for k, v := range val {
+			result[k] = deepCopyValue(v)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, v := range val {
+			result[i] = deepCopyValue(v)
+		}
+		return result
+	case string, int, int64, int32, float64, bool, nil:
+		// Immutable types, safe to return as-is
+		return val
+	default:
+		// For other types, return as-is (they should be immutable or not shared)
 		return val
 	}
 }

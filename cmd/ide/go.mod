@@ -7,7 +7,7 @@ replace github.com/noi-techpark/go-silky => ../..
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gdamore/tcell/v2 v2.9.0
-	github.com/noi-techpark/go-silky v1.0.2
+	github.com/noi-techpark/go-silky v1.0.3
 	github.com/rivo/tview v0.42.0
 	github.com/sergi/go-diff v1.4.0
 	gopkg.in/yaml.v3 v3.0.1
