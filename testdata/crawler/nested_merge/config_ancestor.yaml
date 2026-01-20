@@ -1,0 +1,44 @@
+# Test: Nested merge to ANCESTOR context (not parent)
+# Demonstrates: mergeWithContext to skip levels and merge to ancestor
+# The deepest request merges directly to the location context (skipping station)
+
+rootContext: []
+
+steps:
+  - type: request
+    name: "Get all locations"
+    request:
+      url: "https://api.example.com/locations"
+      method: GET
+    steps:
+      - type: forEach
+        name: "Iterate locations"
+        path: .
+        as: location
+        steps:
+          - type: request
+            name: "Get Stations"
+            request:
+              url: "https://api.example.com/stations?locationId={{ .location.locationID }}"
+              method: GET
+            # First merge stations to location
+            mergeWithContext:
+              name: location
+              rule: .stations = $res
+
+          # After stations are merged, iterate over them
+          - type: forEach
+            name: "Iterate stations"
+            path: .stations
+            as: station
+            steps:
+              - type: request
+                name: "Get Station Details"
+                request:
+                  url: "https://api.example.com/station?stationID={{ .station.stationID }}"
+                  method: GET
+                # Merge directly to LOCATION context (ancestor, not parent/station)
+                mergeWithContext:
+                  name: location
+                  rule: .allPlaces = ((.allPlaces // []) + $res.places)
+    mergeOn: ". = [{locations: $res}]"

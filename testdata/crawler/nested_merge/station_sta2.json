@@ -1,0 +1,6 @@
+{
+  "stationID": "sta2",
+  "places": [
+    {"placeID": "p3", "available": true}
+  ]
+}

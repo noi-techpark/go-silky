@@ -1,0 +1,41 @@
+[
+  {
+    "locations": [
+      {
+        "locationID": "loc1",
+        "name": "Location One",
+        "stations": [
+          {
+            "stationID": "sta1",
+            "name": "Station Alpha",
+            "places": [
+              {"placeID": "p1", "available": true},
+              {"placeID": "p2", "available": false}
+            ]
+          },
+          {
+            "stationID": "sta2",
+            "name": "Station Beta",
+            "places": [
+              {"placeID": "p3", "available": true}
+            ]
+          }
+        ]
+      },
+      {
+        "locationID": "loc2",
+        "name": "Location Two",
+        "stations": [
+          {
+            "stationID": "sta3",
+            "name": "Station Gamma",
+            "places": [
+              {"placeID": "p4", "available": true},
+              {"placeID": "p5", "available": true}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

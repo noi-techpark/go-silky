@@ -1177,7 +1177,7 @@ func childMapWithClonedContext(base map[string]*Context, currentContext *Context
 	// Create the working context with the response data
 	newMap[workingKey] = &Context{
 		Data:          value,
-		ParentContext: currentContext.key, // Parent is the original context
+		ParentContext: currentContext.ParentContext, // Parent is the same as the original context
 		key:           workingKey,
 		depth:         currentContext.depth + 1,
 	}

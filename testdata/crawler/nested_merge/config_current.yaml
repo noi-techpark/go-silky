@@ -1,0 +1,46 @@
+# Test: Nested merge to current context at each level
+# Demonstrates: Deep nesting with mergeWithContext to station context
+# Each station gets enriched with places from the detail request
+
+rootContext: []
+
+steps:
+  - type: request
+    name: "Get all locations"
+    request:
+      url: "https://api.example.com/locations"
+      method: GET
+    # Nested steps process the response (locations array)
+    steps:
+      - type: forEach
+        name: "Iterate locations"
+        path: .
+        as: location
+        steps:
+          - type: request
+            name: "Get Stations"
+            request:
+              url: "https://api.example.com/stations?locationId={{ .location.locationID }}"
+              method: GET
+            # Nested steps process the stations response
+            steps:
+              - type: forEach
+                name: "Iterate stations"
+                path: .
+                as: station
+                steps:
+                  - type: request
+                    name: "Get Station Details"
+                    request:
+                      url: "https://api.example.com/station?stationID={{ .station.stationID }}"
+                      method: GET
+                    # Merge places into the station context
+                    mergeWithContext:
+                      name: station
+                      rule: .places = $res.places
+            # Merge enriched stations into the location context
+            mergeWithContext:
+              name: location
+              rule: .stations = $res
+    # After all nested processing, merge enriched locations to root
+    mergeOn: ". = [{locations: $res}]"

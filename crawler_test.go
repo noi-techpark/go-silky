@@ -1028,3 +1028,74 @@ func TestEdgeCaseMultipleForValues(t *testing.T) {
 	require.Equal(t, 2, tiers["free"], "free should appear twice")
 	require.Equal(t, 2, tiers["premium"], "premium should appear twice")
 }
+
+// Nested Merge Tests - verify deep nesting with different merge targets
+
+func TestNestedMergeToCurrentContext(t *testing.T) {
+	// Tests nested forEach with mergeWithContext to station context
+	// Each station gets enriched with places from the detail request
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/locations":                   "testdata/crawler/nested_merge/locations.json",
+		"https://api.example.com/stations?locationId=loc1":    "testdata/crawler/nested_merge/stations_loc1.json",
+		"https://api.example.com/stations?locationId=loc2":    "testdata/crawler/nested_merge/stations_loc2.json",
+		"https://api.example.com/station?stationID=sta1":      "testdata/crawler/nested_merge/station_sta1.json",
+		"https://api.example.com/station?stationID=sta2":      "testdata/crawler/nested_merge/station_sta2.json",
+		"https://api.example.com/station?stationID=sta3":      "testdata/crawler/nested_merge/station_sta3.json",
+	})
+
+	craw, validationErrors, err := NewApiCrawler("testdata/crawler/nested_merge/config_current.yaml")
+	if err != nil {
+		for _, ve := range validationErrors {
+			t.Logf("Validation error: %v", ve)
+		}
+	}
+	require.Nil(t, err, "Failed to load crawler config")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/nested_merge/output_current.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
+func TestNestedMergeToAncestorContext(t *testing.T) {
+	// Tests mergeWithContext to ancestor context (location, not station)
+	// All places from all stations are collected into the location's allPlaces array
+	// This verifies we're not shadowing ancestor contexts
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/locations":                   "testdata/crawler/nested_merge/locations.json",
+		"https://api.example.com/stations?locationId=loc1":    "testdata/crawler/nested_merge/stations_loc1.json",
+		"https://api.example.com/stations?locationId=loc2":    "testdata/crawler/nested_merge/stations_loc2.json",
+		"https://api.example.com/station?stationID=sta1":      "testdata/crawler/nested_merge/station_sta1.json",
+		"https://api.example.com/station?stationID=sta2":      "testdata/crawler/nested_merge/station_sta2.json",
+		"https://api.example.com/station?stationID=sta3":      "testdata/crawler/nested_merge/station_sta3.json",
+	})
+
+	craw, validationErrors, err := NewApiCrawler("testdata/crawler/nested_merge/config_ancestor.yaml")
+	if err != nil {
+		for _, ve := range validationErrors {
+			t.Logf("Validation error: %v", ve)
+		}
+	}
+	require.Nil(t, err, "Failed to load crawler config")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/nested_merge/output_ancestor.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
