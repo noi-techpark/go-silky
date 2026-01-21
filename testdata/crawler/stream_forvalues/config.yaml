@@ -1,0 +1,27 @@
+# Test: Streaming with forValues
+# Demonstrates: streaming individual structures from forValues iterations
+
+rootContext: []
+stream: true
+
+steps:
+  - type: forValues
+    name: "Iterate forecast IDs"
+    values:
+      - id-001
+      - id-002
+      - id-003
+    as: id
+    steps:
+      - type: request
+        name: "Get Forecast"
+        request:
+          url: "https://api.example.com/forecasts/{{ .id }}.json"
+          method: GET
+          headers:
+            Accept: application/json
+        mergeOn: |
+          . += [{
+            id: $ctx.id,
+            forecast: $res
+          }]

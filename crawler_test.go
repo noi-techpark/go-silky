@@ -1035,12 +1035,12 @@ func TestNestedMergeToCurrentContext(t *testing.T) {
 	// Tests nested forEach with mergeWithContext to station context
 	// Each station gets enriched with places from the detail request
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/locations":                   "testdata/crawler/nested_merge/locations.json",
-		"https://api.example.com/stations?locationId=loc1":    "testdata/crawler/nested_merge/stations_loc1.json",
-		"https://api.example.com/stations?locationId=loc2":    "testdata/crawler/nested_merge/stations_loc2.json",
-		"https://api.example.com/station?stationID=sta1":      "testdata/crawler/nested_merge/station_sta1.json",
-		"https://api.example.com/station?stationID=sta2":      "testdata/crawler/nested_merge/station_sta2.json",
-		"https://api.example.com/station?stationID=sta3":      "testdata/crawler/nested_merge/station_sta3.json",
+		"https://api.example.com/locations":                "testdata/crawler/nested_merge/locations.json",
+		"https://api.example.com/stations?locationId=loc1": "testdata/crawler/nested_merge/stations_loc1.json",
+		"https://api.example.com/stations?locationId=loc2": "testdata/crawler/nested_merge/stations_loc2.json",
+		"https://api.example.com/station?stationID=sta1":   "testdata/crawler/nested_merge/station_sta1.json",
+		"https://api.example.com/station?stationID=sta2":   "testdata/crawler/nested_merge/station_sta2.json",
+		"https://api.example.com/station?stationID=sta3":   "testdata/crawler/nested_merge/station_sta3.json",
 	})
 
 	craw, validationErrors, err := NewApiCrawler("testdata/crawler/nested_merge/config_current.yaml")
@@ -1070,12 +1070,12 @@ func TestNestedMergeToAncestorContext(t *testing.T) {
 	// All places from all stations are collected into the location's allPlaces array
 	// This verifies we're not shadowing ancestor contexts
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/locations":                   "testdata/crawler/nested_merge/locations.json",
-		"https://api.example.com/stations?locationId=loc1":    "testdata/crawler/nested_merge/stations_loc1.json",
-		"https://api.example.com/stations?locationId=loc2":    "testdata/crawler/nested_merge/stations_loc2.json",
-		"https://api.example.com/station?stationID=sta1":      "testdata/crawler/nested_merge/station_sta1.json",
-		"https://api.example.com/station?stationID=sta2":      "testdata/crawler/nested_merge/station_sta2.json",
-		"https://api.example.com/station?stationID=sta3":      "testdata/crawler/nested_merge/station_sta3.json",
+		"https://api.example.com/locations":                "testdata/crawler/nested_merge/locations.json",
+		"https://api.example.com/stations?locationId=loc1": "testdata/crawler/nested_merge/stations_loc1.json",
+		"https://api.example.com/stations?locationId=loc2": "testdata/crawler/nested_merge/stations_loc2.json",
+		"https://api.example.com/station?stationID=sta1":   "testdata/crawler/nested_merge/station_sta1.json",
+		"https://api.example.com/station?stationID=sta2":   "testdata/crawler/nested_merge/station_sta2.json",
+		"https://api.example.com/station?stationID=sta3":   "testdata/crawler/nested_merge/station_sta3.json",
 	})
 
 	craw, validationErrors, err := NewApiCrawler("testdata/crawler/nested_merge/config_ancestor.yaml")
@@ -1098,4 +1098,59 @@ func TestNestedMergeToAncestorContext(t *testing.T) {
 	require.Nil(t, err)
 
 	assert.Equal(t, expected, data)
+}
+
+func TestStreamingForValues(t *testing.T) {
+	// Tests streaming with forValues - each iteration emits a structure
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/forecasts/id-001.json": "testdata/crawler/stream_forvalues/forecast_id1.json",
+		"https://api.example.com/forecasts/id-002.json": "testdata/crawler/stream_forvalues/forecast_id2.json",
+		"https://api.example.com/forecasts/id-003.json": "testdata/crawler/stream_forvalues/forecast_id3.json",
+	})
+
+	craw, validationErrors, err := NewApiCrawler("testdata/crawler/stream_forvalues/config.yaml")
+	if err != nil {
+		for _, ve := range validationErrors {
+			t.Logf("Validation error: %v", ve)
+		}
+	}
+	require.Nil(t, err, "Failed to load crawler config")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	stream := craw.GetDataStream()
+	var streamedItems []interface{}
+
+	// Collect streamed items
+	done := make(chan struct{})
+	go func() {
+		for item := range stream {
+			streamedItems = append(streamedItems, item)
+		}
+		close(done)
+	}()
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	// Close stream to signal no more data, then wait for goroutine to finish
+	close(stream)
+	<-done
+
+	// Should have streamed 3 items (one per forValues iteration)
+	require.Equal(t, 3, len(streamedItems), "Should stream 3 items")
+
+	// Verify each streamed item has the expected structure
+	for i, item := range streamedItems {
+		itemMap, ok := item.(map[string]interface{})
+		require.True(t, ok, "Streamed item %d should be a map", i)
+		require.NotNil(t, itemMap["id"], "Item %d should have 'id'", i)
+		require.NotNil(t, itemMap["forecast"], "Item %d should have 'forecast'", i)
+
+		// Verify forecast has expected fields
+		forecast, ok := itemMap["forecast"].(map[string]interface{})
+		require.True(t, ok, "forecast should be a map")
+		require.NotNil(t, forecast["temperature"], "forecast should have temperature")
+		require.NotNil(t, forecast["conditions"], "forecast should have conditions")
+	}
 }
