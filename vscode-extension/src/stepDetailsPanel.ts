@@ -12,6 +12,7 @@ export class StepDetailsPanel {
     private readonly panel: vscode.WebviewPanel;
     private readonly extensionUri: vscode.Uri;
     private disposables: vscode.Disposable[] = [];
+    private jsonBlockCounter = 0;
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
         this.panel = panel;
@@ -54,7 +55,8 @@ export class StepDetailsPanel {
             column,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                enableFindWidget: true
             }
         );
 
@@ -91,9 +93,46 @@ export class StepDetailsPanel {
         });
     }
 
+    private renderJsonBlock(data: any, id: string, opts?: {
+        label?: string;
+        open?: boolean;
+        openInTab?: boolean;
+    }): string {
+        const safeJson = JSON.stringify(data)
+            .replace(/</g, '\\u003c')
+            .replace(/>/g, '\\u003e')
+            .replace(/&/g, '\\u0026');
+        const depth = (opts?.open !== false) ? 2 : 0;
+
+        let toolbar = `
+            <div class="json-tree-toolbar">
+                <button class="btn btn-json-copy" data-tree="${id}">Copy</button>`;
+        if (opts?.openInTab) {
+            toolbar += `<button class="btn btn-json-open" data-tree="${id}" data-title="${escapeHtml(opts.label || 'JSON')}">Open in Tab</button>`;
+        }
+        toolbar += `
+                <button class="btn btn-json-expand" data-tree="${id}">Expand All</button>
+                <button class="btn btn-json-collapse" data-tree="${id}">Collapse All</button>
+            </div>`;
+
+        return `
+            <div class="json-tree-wrapper">
+                ${toolbar}
+                <div class="json-tree" id="${id}" data-depth="${depth}"></div>
+                <script type="application/json" id="${id}-data">${safeJson}</script>
+            </div>`;
+    }
+
+    private nextJsonBlockId(prefix: string): string {
+        return `${prefix}-${++this.jsonBlockCounter}`;
+    }
+
     private getHtmlForStep(data: StepProfilerData): string {
         const nonce = getNonce();
+        this.jsonBlockCounter = 0;
         const styleUri = getMediaUri(this.panel.webview, this.extensionUri, 'styles', 'shared.css');
+        const jsonTreeCssUri = getMediaUri(this.panel.webview, this.extensionUri, 'styles', 'jsonTree.css');
+        const jsonTreeScriptUri = getMediaUri(this.panel.webview, this.extensionUri, 'scripts', 'jsonTree.js');
 
         return `<!DOCTYPE html>
         <html lang="en">
@@ -103,28 +142,78 @@ export class StepDetailsPanel {
             <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <title>Step Details</title>
             <link rel="stylesheet" type="text/css" href="${styleUri}">
+            <link rel="stylesheet" type="text/css" href="${jsonTreeCssUri}">
             <style>
                 body { padding: 20px; }
             </style>
         </head>
         <body>
             ${this.renderStepDetails(data)}
+            <script nonce="${nonce}" src="${jsonTreeScriptUri}"></script>
             <script nonce="${nonce}">
                 const vscode = acquireVsCodeApi();
 
                 // Wait for DOM to load
                 document.addEventListener('DOMContentLoaded', function() {
-                    // Setup copy buttons
+                    // Setup JSON tree toolbar: copy
+                    document.querySelectorAll('.btn-json-copy').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const treeId = this.getAttribute('data-tree');
+                            const dataEl = document.getElementById(treeId + '-data');
+                            if (dataEl) {
+                                try {
+                                    const parsed = JSON.parse(dataEl.textContent);
+                                    vscode.postMessage({ command: 'copy', text: JSON.stringify(parsed, null, 2) });
+                                } catch(e) {
+                                    vscode.postMessage({ command: 'copy', text: dataEl.textContent });
+                                }
+                            }
+                        });
+                    });
+
+                    // Setup JSON tree toolbar: open in tab
+                    document.querySelectorAll('.btn-json-open').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const treeId = this.getAttribute('data-tree');
+                            const title = this.getAttribute('data-title') || 'JSON';
+                            const dataEl = document.getElementById(treeId + '-data');
+                            if (dataEl) {
+                                try {
+                                    const parsed = JSON.parse(dataEl.textContent);
+                                    vscode.postMessage({ command: 'openInTab', content: JSON.stringify(parsed, null, 2), title: title });
+                                } catch(e) {
+                                    vscode.postMessage({ command: 'openInTab', content: dataEl.textContent, title: title });
+                                }
+                            }
+                        });
+                    });
+
+                    // Setup JSON tree toolbar: expand all
+                    document.querySelectorAll('.btn-json-expand').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const treeId = this.getAttribute('data-tree');
+                            const tree = document.getElementById(treeId);
+                            if (tree && window.jsonTreeExpandAll) { window.jsonTreeExpandAll(tree); }
+                        });
+                    });
+
+                    // Setup JSON tree toolbar: collapse all
+                    document.querySelectorAll('.btn-json-collapse').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const treeId = this.getAttribute('data-tree');
+                            const tree = document.getElementById(treeId);
+                            if (tree && window.jsonTreeCollapseAll) { window.jsonTreeCollapseAll(tree); }
+                        });
+                    });
+
+                    // Setup copy buttons (for non-JSON code blocks)
                     document.querySelectorAll('.btn-copy').forEach(button => {
+                        if (button.classList.contains('btn-json-copy')) return;
                         button.addEventListener('click', function() {
                             const targetId = this.getAttribute('data-target');
                             const targetElement = document.getElementById(targetId);
                             if (targetElement) {
-                                const text = targetElement.textContent;
-                                vscode.postMessage({
-                                    command: 'copy',
-                                    text: text
-                                });
+                                vscode.postMessage({ command: 'copy', text: targetElement.textContent });
                             }
                         });
                     });
@@ -137,11 +226,16 @@ export class StepDetailsPanel {
                             if (section) {
                                 const activeView = section.querySelector('.comparison-view[style*="display: block"]');
                                 if (activeView) {
-                                    const text = activeView.textContent;
-                                    vscode.postMessage({
-                                        command: 'copy',
-                                        text: text
-                                    });
+                                    // Try to get raw JSON from the tree data script
+                                    const dataScript = activeView.querySelector('script[type="application/json"]');
+                                    if (dataScript) {
+                                        try {
+                                            const parsed = JSON.parse(dataScript.textContent);
+                                            vscode.postMessage({ command: 'copy', text: JSON.stringify(parsed, null, 2) });
+                                            return;
+                                        } catch(e) {}
+                                    }
+                                    vscode.postMessage({ command: 'copy', text: activeView.textContent });
                                 }
                             }
                         });
@@ -154,37 +248,28 @@ export class StepDetailsPanel {
                             const selectedView = document.getElementById(viewId);
                             if (!selectedView) return;
 
-                            // Find parent section
                             const section = selectedView.closest('.section');
                             if (!section) return;
 
-                            // Hide all comparison views in this section
                             const views = section.querySelectorAll('.comparison-view');
                             views.forEach(view => view.style.display = 'none');
 
-                            // Show the selected view
                             selectedView.style.display = 'block';
 
-                            // Update button active states in this section
                             const buttons = section.querySelectorAll('.btn-view');
                             buttons.forEach(btn => btn.classList.remove('active'));
                             this.classList.add('active');
                         });
                     });
 
-                    // Setup open in tab buttons
+                    // Setup open in tab buttons (for non-JSON code blocks)
                     document.querySelectorAll('.btn-open-tab').forEach(button => {
                         button.addEventListener('click', function() {
                             const targetId = this.getAttribute('data-target');
                             const title = this.getAttribute('data-title') || 'JSON';
                             const targetElement = document.getElementById(targetId);
                             if (targetElement) {
-                                const content = targetElement.textContent;
-                                vscode.postMessage({
-                                    command: 'openInTab',
-                                    content: content,
-                                    title: title
-                                });
+                                vscode.postMessage({ command: 'openInTab', content: targetElement.textContent, title: title });
                             }
                         });
                     });
@@ -197,15 +282,18 @@ export class StepDetailsPanel {
                             if (section) {
                                 const activeView = section.querySelector('.comparison-view[style*="display: block"]');
                                 if (activeView) {
-                                    // Determine title based on which view is active
                                     const activeButton = section.querySelector('.btn-view.active');
                                     const viewName = activeButton ? activeButton.textContent : 'Comparison';
-                                    const content = activeView.textContent;
-                                    vscode.postMessage({
-                                        command: 'openInTab',
-                                        content: content,
-                                        title: viewName
-                                    });
+                                    // Try raw JSON from tree data script
+                                    const dataScript = activeView.querySelector('script[type="application/json"]');
+                                    if (dataScript) {
+                                        try {
+                                            const parsed = JSON.parse(dataScript.textContent);
+                                            vscode.postMessage({ command: 'openInTab', content: JSON.stringify(parsed, null, 2), title: viewName });
+                                            return;
+                                        } catch(e) {}
+                                    }
+                                    vscode.postMessage({ command: 'openInTab', content: activeView.textContent, title: viewName });
                                 }
                             }
                         });
@@ -267,8 +355,8 @@ export class StepDetailsPanel {
     }
 
     private renderRootStart(data: StepProfilerData): string {
-        const contextMap = JSON.stringify(data.data?.contextMap || {}, null, 2);
-        const config = JSON.stringify(data.data?.config || {}, null, 2);
+        const contextMapId = this.nextJsonBlockId('root-context-map');
+        const configId = this.nextJsonBlockId('root-config');
 
         return `
             <div class="header">
@@ -277,37 +365,26 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Initial Context Map</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="root-context-map">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Initial Context Map</div>
                 <details open>
                     <summary>Context Map</summary>
-                    <div class="code-block" id="root-context-map">${escapeHtml(contextMap)}</div>
+                    ${this.renderJsonBlock(data.data?.contextMap || {}, contextMapId, { label: 'Context Map', openInTab: true })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Configuration</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="root-config">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Configuration</div>
                 <details>
                     <summary>Crawler Configuration</summary>
-                    <div class="code-block" id="root-config">${escapeHtml(config)}</div>
+                    ${this.renderJsonBlock(data.data?.config || {}, configId, { label: 'Configuration', open: false })}
                 </details>
             </div>
         `;
     }
 
     private renderRequestStep(data: StepProfilerData): string {
-        const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
         const duration = data.duration ? `${data.duration}ms (${(data.duration / 1000).toFixed(3)}s)` : 'In progress...';
-        const configId = `request-step-config-${data.id}`;
+        const configId = this.nextJsonBlockId('request-step-config');
 
         return `
             <div class="header">
@@ -317,24 +394,18 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Step Configuration</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Step Configuration</div>
                 <details open>
                     <summary>Configuration</summary>
-                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
+                    ${this.renderJsonBlock(data.data?.stepConfig || {}, configId, { label: 'Step Configuration' })}
                 </details>
             </div>
         `;
     }
 
     private renderForEachStep(data: StepProfilerData): string {
-        const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
         const duration = data.duration ? `${data.duration}ms` : 'In progress...';
-        const configId = `foreach-step-config-${data.id}`;
+        const configId = this.nextJsonBlockId('foreach-step-config');
 
         return `
             <div class="header">
@@ -344,26 +415,19 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Step Configuration</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Step Configuration</div>
                 <details open>
                     <summary>Configuration</summary>
-                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
+                    ${this.renderJsonBlock(data.data?.stepConfig || {}, configId, { label: 'Step Configuration' })}
                 </details>
             </div>
         `;
     }
 
     private renderForValuesStep(data: StepProfilerData): string {
-        const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
-        const values = JSON.stringify(data.data?.values || [], null, 2);
         const duration = data.duration ? `${data.duration}ms` : 'In progress...';
-        const configId = `forvalues-step-config-${data.id}`;
-        const valuesId = `forvalues-values-${data.id}`;
+        const valuesId = this.nextJsonBlockId('forvalues-values');
+        const configId = this.nextJsonBlockId('forvalues-step-config');
 
         return `
             <div class="header">
@@ -373,28 +437,18 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Literal Values</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${valuesId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Literal Values</div>
                 <details open>
                     <summary>Values to iterate</summary>
-                    <div class="code-block" id="${valuesId}">${escapeHtml(values)}</div>
+                    ${this.renderJsonBlock(data.data?.values || [], valuesId, { label: 'Values' })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Step Configuration</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Step Configuration</div>
                 <details>
                     <summary>Configuration</summary>
-                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
+                    ${this.renderJsonBlock(data.data?.stepConfig || {}, configId, { label: 'Step Configuration', open: false })}
                 </details>
             </div>
         `;
@@ -403,10 +457,8 @@ export class StepDetailsPanel {
     private renderContextSelection(data: StepProfilerData): string {
         const contextPath = data.data?.contextPath || '';
         const currentKey = data.data?.currentContextKey || '';
-        const contextData = JSON.stringify(data.data?.currentContextData || {}, null, 2);
-        const fullContextMap = JSON.stringify(data.data?.fullContextMap || {}, null, 2);
-        const contextDataId = `context-data-${data.id}`;
-        const fullContextMapId = `full-context-map-${data.id}`;
+        const contextDataId = this.nextJsonBlockId('context-data');
+        const fullContextMapId = this.nextJsonBlockId('full-context-map');
 
         return `
             <div class="header">
@@ -425,28 +477,18 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Current Context Data</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${contextDataId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Current Context Data</div>
                 <details open>
                     <summary>Context Data</summary>
-                    <div class="code-block" id="${contextDataId}">${escapeHtml(contextData)}</div>
+                    ${this.renderJsonBlock(data.data?.currentContextData || {}, contextDataId, { label: 'Context Data', openInTab: true })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Full Context Map (after selection)</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${fullContextMapId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Full Context Map (after selection)</div>
                 <details>
                     <summary>Click to show updated context map</summary>
-                    <div class="code-block" id="${fullContextMapId}">${escapeHtml(fullContextMap)}</div>
+                    ${this.renderJsonBlock(data.data?.fullContextMap || {}, fullContextMapId, { label: 'Full Context Map', open: false, openInTab: true })}
                 </details>
             </div>
         `;
@@ -454,12 +496,10 @@ export class StepDetailsPanel {
 
     private renderPaginationEval(data: StepProfilerData): string {
         const pageNumber = data.data?.pageNumber || 0;
-        const paginationConfig = JSON.stringify(data.data?.paginationConfig || {}, null, 2);
-        const previousResponse = JSON.stringify(data.data?.previousResponse || {}, null, 2);
-        const beforeState = data.data?.previousState || {};
-        const afterState = data.data?.afterState || {};
-        const paginationConfigId = `pagination-config-${data.id}`;
-        const previousResponseId = `previous-response-${data.id}`;
+        const paginationConfigId = this.nextJsonBlockId('pagination-config');
+        const previousResponseId = this.nextJsonBlockId('previous-response');
+        const beforeStateId = this.nextJsonBlockId('before-state');
+        const afterStateId = this.nextJsonBlockId('after-state');
 
         return `
             <div class="header">
@@ -469,28 +509,18 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Pagination Configuration</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${paginationConfigId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Pagination Configuration</div>
                 <details>
                     <summary>Configuration</summary>
-                    <div class="code-block" id="${paginationConfigId}">${escapeHtml(paginationConfig)}</div>
+                    ${this.renderJsonBlock(data.data?.paginationConfig || {}, paginationConfigId, { label: 'Pagination Config', open: false })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Previous Response (used for extraction)</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${previousResponseId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Previous Response (used for extraction)</div>
                 <details>
                     <summary>Click to show response body and headers</summary>
-                    <div class="code-block" id="${previousResponseId}">${escapeHtml(previousResponse)}</div>
+                    ${this.renderJsonBlock(data.data?.previousResponse || {}, previousResponseId, { label: 'Previous Response', open: false, openInTab: true })}
                 </details>
             </div>
 
@@ -499,11 +529,11 @@ export class StepDetailsPanel {
                 <div class="side-by-side">
                     <div>
                         <h4>Before State</h4>
-                        <div class="code-block">${escapeHtml(JSON.stringify(beforeState, null, 2))}</div>
+                        ${this.renderJsonBlock(data.data?.previousState || {}, beforeStateId, { label: 'Before State' })}
                     </div>
                     <div>
                         <h4>After State</h4>
-                        <div class="code-block">${escapeHtml(JSON.stringify(afterState, null, 2))}</div>
+                        ${this.renderJsonBlock(data.data?.afterState || {}, afterStateId, { label: 'After State' })}
                     </div>
                 </div>
             </div>
@@ -512,12 +542,12 @@ export class StepDetailsPanel {
 
     private renderUrlComposition(data: StepProfilerData): string {
         const urlTemplate = data.data?.urlTemplate || '';
-        const templateContext = JSON.stringify(data.data?.goTemplateContext || {}, null, 2);
-        const paginationState = JSON.stringify(data.data?.paginationState || {}, null, 2);
         const resultUrl = data.data?.resultUrl || '';
-        const resultHeaders = JSON.stringify(data.data?.resultHeaders || {}, null, 2);
-        const resultBody = JSON.stringify(data.data?.resultBody || {}, null, 2);
         const resultUrlId = `result-url-${data.id}`;
+        const templateContextId = this.nextJsonBlockId('template-context');
+        const paginationStateId = this.nextJsonBlockId('pagination-state');
+        const resultHeadersId = this.nextJsonBlockId('result-headers');
+        const resultBodyId = this.nextJsonBlockId('result-body');
 
         return `
             <div class="header">
@@ -531,22 +561,18 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Template Context</div>
-                </div>
+                <div class="section-title">Template Context</div>
                 <details>
                     <summary>Go Template Variables</summary>
-                    <div class="code-block">${escapeHtml(templateContext)}</div>
+                    ${this.renderJsonBlock(data.data?.goTemplateContext || {}, templateContextId, { label: 'Template Context', open: false, openInTab: true })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Pagination State</div>
-                </div>
+                <div class="section-title">Pagination State</div>
                 <details>
                     <summary>Pagination Parameters</summary>
-                    <div class="code-block">${escapeHtml(paginationState)}</div>
+                    ${this.renderJsonBlock(data.data?.paginationState || {}, paginationStateId, { label: 'Pagination State', open: false })}
                 </details>
             </div>
 
@@ -554,7 +580,7 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">✅ Resulting URL</div>
                     <div class="actions">
-                        <button class="btn btn-copy" data-target="${resultUrlId}">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${resultUrlId}">Copy</button>
                     </div>
                 </div>
                 <div class="code-block" id="${resultUrlId}">${escapeHtml(resultUrl)}</div>
@@ -563,14 +589,14 @@ export class StepDetailsPanel {
             <div class="section">
                 <details>
                     <summary>Resulting Headers</summary>
-                    <div class="code-block">${escapeHtml(resultHeaders)}</div>
+                    ${this.renderJsonBlock(data.data?.resultHeaders || {}, resultHeadersId, { label: 'Result Headers', open: false })}
                 </details>
             </div>
 
             <div class="section">
                 <details>
                     <summary>Resulting Body</summary>
-                    <div class="code-block">${escapeHtml(resultBody)}</div>
+                    ${this.renderJsonBlock(data.data?.resultBody || {}, resultBodyId, { label: 'Result Body', open: false })}
                 </details>
             </div>
         `;
@@ -580,9 +606,9 @@ export class StepDetailsPanel {
         const method = data.data?.method || '';
         const url = data.data?.url || '';
         const curl = data.data?.curl || '';
-        const headers = JSON.stringify(data.data?.headers || {}, null, 2);
-        const body = JSON.stringify(data.data?.body || {}, null, 2);
         const curlId = `curl-command-${data.id}`;
+        const headersId = this.nextJsonBlockId('req-headers');
+        const bodyId = this.nextJsonBlockId('req-body');
 
         return `
             <div class="header">
@@ -597,9 +623,9 @@ export class StepDetailsPanel {
 
             <div class="section">
                 <div class="section-header">
-                    <div class="section-title">💻 curl Command</div>
+                    <div class="section-title">curl Command</div>
                     <div class="actions">
-                        <button class="btn btn-copy" data-target="${curlId}">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${curlId}">Copy</button>
                     </div>
                 </div>
                 <div class="code-block" id="${curlId}">${escapeHtml(curl)}</div>
@@ -608,14 +634,14 @@ export class StepDetailsPanel {
             <div class="section">
                 <details open>
                     <summary>Request Headers</summary>
-                    <div class="code-block">${escapeHtml(headers)}</div>
+                    ${this.renderJsonBlock(data.data?.headers || {}, headersId, { label: 'Request Headers' })}
                 </details>
             </div>
 
             <div class="section">
                 <details>
                     <summary>Request Body</summary>
-                    <div class="code-block">${body ? escapeHtml(body) : '(none)'}</div>
+                    ${data.data?.body ? this.renderJsonBlock(data.data.body, bodyId, { label: 'Request Body', open: false }) : '<div class="code-block">(none)</div>'}
                 </details>
             </div>
         `;
@@ -624,10 +650,10 @@ export class StepDetailsPanel {
     private renderRequestResponse(data: StepProfilerData): string {
         const statusCode = data.data?.statusCode || 0;
         const statusClass = statusCode >= 200 && statusCode < 300 ? 'status-success' : 'status-error';
-        const headers = JSON.stringify(data.data?.headers || {}, null, 2);
-        const body = JSON.stringify(data.data?.body || {}, null, 2);
         const responseSize = data.data?.responseSize || 0;
         const duration = data.data?.durationMs || 0;
+        const headersId = this.nextJsonBlockId('resp-headers');
+        const bodyId = this.nextJsonBlockId('resp-body');
 
         return `
             <div class="header">
@@ -643,28 +669,22 @@ export class StepDetailsPanel {
 
             <div class="section">
                 <div class="section-title">Response Info</div>
-                <div>📦 Size: ${formatBytes(responseSize)}</div>
-                <div>⏱️  Time: ${duration} ms</div>
+                <div>Size: ${formatBytes(responseSize)}</div>
+                <div>Time: ${duration} ms</div>
             </div>
 
             <div class="section">
                 <details>
                     <summary>Response Headers</summary>
-                    <div class="code-block">${escapeHtml(headers)}</div>
+                    ${this.renderJsonBlock(data.data?.headers || {}, headersId, { label: 'Response Headers', open: false })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Response Body</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="response-body-${data.id}">📋 Copy</button>
-                        <button class="btn btn-open-tab" data-target="response-body-${data.id}" data-title="Response Body">📄 Open in Tab</button>
-                    </div>
-                </div>
+                <div class="section-title">Response Body</div>
                 <details open>
                     <summary>Body Content</summary>
-                    <div class="code-block" id="response-body-${data.id}">${escapeHtml(body)}</div>
+                    ${this.renderJsonBlock(data.data?.body || {}, bodyId, { label: 'Response Body', openInTab: true })}
                 </details>
             </div>
         `;
@@ -679,6 +699,8 @@ export class StepDetailsPanel {
         const beforeId = `before-transform-${data.id}`;
         const afterId = `after-transform-${data.id}`;
         const diffId = `diff-transform-${data.id}`;
+        const beforeTreeId = this.nextJsonBlockId('transform-before');
+        const afterTreeId = this.nextJsonBlockId('transform-after');
 
         return `
             <div class="header">
@@ -695,8 +717,8 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Comparison</div>
                     <div class="actions">
-                        <button class="btn btn-copy-active" data-section="${sectionId}">📋 Copy</button>
-                        <button class="btn btn-open-active" data-section="${sectionId}">📄 Open in Tab</button>
+                        <button class="btn btn-copy-active" data-section="${sectionId}">Copy</button>
+                        <button class="btn btn-open-active" data-section="${sectionId}">Open in Tab</button>
                     </div>
                 </div>
                 <div class="section-header">
@@ -706,11 +728,11 @@ export class StepDetailsPanel {
                 </div>
 
                 <div id="${beforeId}" class="comparison-view" style="display: block;">
-                    <div class="code-block">${escapeHtml(before)}</div>
+                    ${this.renderJsonBlock(data.data?.beforeResponse || {}, beforeTreeId, { label: 'Before Transform', openInTab: true })}
                 </div>
 
                 <div id="${afterId}" class="comparison-view" style="display: none;">
-                    <div class="code-block">${escapeHtml(after)}</div>
+                    ${this.renderJsonBlock(data.data?.afterResponse || {}, afterTreeId, { label: 'After Transform', openInTab: true })}
                 </div>
 
                 <div id="${diffId}" class="comparison-view" style="display: none;">
@@ -726,12 +748,14 @@ export class StepDetailsPanel {
         const mergeRule = data.data?.mergeRule || '';
         const before = JSON.stringify(data.data?.targetContextBefore || {}, null, 2);
         const after = JSON.stringify(data.data?.targetContextAfter || {}, null, 2);
-        const fullContextMap = JSON.stringify(data.data?.fullContextMap || {}, null, 2);
         const diff = this.computeDiff(before, after);
         const sectionId = `merge-section-${data.id}`;
         const beforeId = `before-merge-${data.id}`;
         const afterId = `after-merge-${data.id}`;
         const diffId = `diff-merge-${data.id}`;
+        const beforeTreeId = this.nextJsonBlockId('merge-before');
+        const afterTreeId = this.nextJsonBlockId('merge-after');
+        const fullCtxMapId = this.nextJsonBlockId('merge-full-context-map');
 
         return `
             <div class="header">
@@ -754,8 +778,8 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Target Context Comparison</div>
                     <div class="actions">
-                        <button class="btn btn-copy-active" data-section="${sectionId}">📋 Copy</button>
-                        <button class="btn btn-open-active" data-section="${sectionId}">📄 Open in Tab</button>
+                        <button class="btn btn-copy-active" data-section="${sectionId}">Copy</button>
+                        <button class="btn btn-open-active" data-section="${sectionId}">Open in Tab</button>
                     </div>
                 </div>
                 <div class="section-header">
@@ -765,11 +789,11 @@ export class StepDetailsPanel {
                 </div>
 
                 <div id="${beforeId}" class="comparison-view" style="display: block;">
-                    <div class="code-block">${escapeHtml(before)}</div>
+                    ${this.renderJsonBlock(data.data?.targetContextBefore || {}, beforeTreeId, { label: 'Before Merge', openInTab: true })}
                 </div>
 
                 <div id="${afterId}" class="comparison-view" style="display: none;">
-                    <div class="code-block">${escapeHtml(after)}</div>
+                    ${this.renderJsonBlock(data.data?.targetContextAfter || {}, afterTreeId, { label: 'After Merge', openInTab: true })}
                 </div>
 
                 <div id="${diffId}" class="comparison-view" style="display: none;">
@@ -778,9 +802,10 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
+                <div class="section-title">Full Context Map (after merge)</div>
                 <details>
-                    <summary>Full Context Map (after merge)</summary>
-                    <div class="code-block">${escapeHtml(fullContextMap)}</div>
+                    <summary>Click to show full context map</summary>
+                    ${this.renderJsonBlock(data.data?.fullContextMap || {}, fullCtxMapId, { label: 'Full Context Map', open: false, openInTab: true })}
                 </details>
             </div>
         `;
@@ -818,17 +843,15 @@ export class StepDetailsPanel {
 
     private renderItemSelection(data: StepProfilerData): string {
         const iterationIndex = data.data?.iterationIndex ?? 0;
-        const itemValue = JSON.stringify(data.data?.itemValue || {}, null, 2);
         const currentKey = data.data?.currentContextKey || '';
-        const contextData = JSON.stringify(data.data?.currentContextData || {}, null, 2);
-        const itemValueId = `item-value-${data.id}`;
-        const contextDataId = `item-context-data-${data.id}`;
+        const itemValueId = this.nextJsonBlockId('item-value');
+        const contextDataId = this.nextJsonBlockId('item-context-data');
 
         return `
             <div class="header">
                 <h2>📦 Item Selection</h2>
                 <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
-                ${data.workerId !== undefined ? `<div class="timestamp">👷 Worker: ${data.workerId}</div>` : ''}
+                ${data.workerId !== undefined ? `<div class="timestamp">Worker: ${data.workerId}</div>` : ''}
             </div>
 
             <div class="section">
@@ -842,37 +865,27 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Item Value</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${itemValueId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Item Value</div>
                 <details open>
                     <summary>Value</summary>
-                    <div class="code-block" id="${itemValueId}">${escapeHtml(itemValue)}</div>
+                    ${this.renderJsonBlock(data.data?.itemValue || {}, itemValueId, { label: 'Item Value', openInTab: true })}
                 </details>
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Current Context Data</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${contextDataId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Current Context Data</div>
                 <details open>
                     <summary>Context</summary>
-                    <div class="code-block" id="${contextDataId}">${escapeHtml(contextData)}</div>
+                    ${this.renderJsonBlock(data.data?.currentContextData || {}, contextDataId, { label: 'Context Data', openInTab: true })}
                 </details>
             </div>
         `;
     }
 
     private renderResult(data: StepProfilerData): string {
-        const result = JSON.stringify(data.data?.result || data.data?.entity || {}, null, 2);
+        const resultData = data.data?.result || data.data?.entity || {};
         const index = data.data?.index;
-        const resultId = `result-data-${data.id}`;
+        const resultId = this.nextJsonBlockId('result-data');
 
         return `
             <div class="header">
@@ -881,15 +894,10 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Result Data</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${resultId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Result Data</div>
                 <details open>
                     <summary>Data</summary>
-                    <div class="code-block" id="${resultId}">${escapeHtml(result)}</div>
+                    ${this.renderJsonBlock(resultData, resultId, { label: 'Result', openInTab: true })}
                 </details>
             </div>
         `;
@@ -899,6 +907,7 @@ export class StepDetailsPanel {
         const authType = data.data?.authType || 'unknown';
         const isStart = data.type === ProfileEventType.EVENT_AUTH_START;
         const duration = data.duration ? `${data.duration}ms` : '';
+        const authDataId = this.nextJsonBlockId('auth-data');
 
         return `
             <div class="header">
@@ -923,7 +932,7 @@ export class StepDetailsPanel {
             <div class="section">
                 <details>
                     <summary>Authentication Data</summary>
-                    <div class="code-block">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                    ${this.renderJsonBlock(data.data, authDataId, { label: 'Auth Data', open: false })}
                 </details>
             </div>
             ` : ''}
@@ -984,6 +993,7 @@ export class StepDetailsPanel {
         const statusCode = data.data?.statusCode;
         const error = data.data?.error;
         const token = data.data?.token || '';
+        const loginDataId = this.nextJsonBlockId('login-data');
 
         return `
             <div class="header">
@@ -1024,7 +1034,7 @@ export class StepDetailsPanel {
             <div class="section">
                 <details>
                     <summary>Full Login Data</summary>
-                    <div class="code-block">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                    ${this.renderJsonBlock(data.data, loginDataId, { label: 'Login Data', open: false })}
                 </details>
             </div>
             ` : ''}
@@ -1170,21 +1180,21 @@ export class StepDetailsPanel {
         const duration = data.duration ? `${data.duration}ms` : '';
         const errorId = `error-message-${data.id}`;
         const stackId = `error-stack-${data.id}`;
-        const dataId = `error-data-${data.id}`;
+        const errorDataId = this.nextJsonBlockId('error-data');
 
         return `
             <div class="header">
                 <h2>❌ ${escapeHtml(errorType)}</h2>
                 <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
                 ${duration ? `<div class="timestamp">⏱️  Duration: ${duration}</div>` : ''}
-                ${stepName ? `<div class="timestamp">📍 Step: ${escapeHtml(stepName)}</div>` : ''}
+                ${stepName ? `<div class="timestamp">Step: ${escapeHtml(stepName)}</div>` : ''}
             </div>
 
             <div class="section">
                 <div class="section-header">
                     <div class="section-title">Error Message</div>
                     <div class="actions">
-                        <button class="btn btn-copy" data-target="${errorId}">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${errorId}">Copy</button>
                     </div>
                 </div>
                 <div class="code-block status-error" id="${errorId}">${escapeHtml(error)}</div>
@@ -1202,7 +1212,7 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Stack Trace</div>
                     <div class="actions">
-                        <button class="btn btn-copy" data-target="${stackId}">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${stackId}">Copy</button>
                     </div>
                 </div>
                 <details open>
@@ -1214,16 +1224,10 @@ export class StepDetailsPanel {
 
             ${data.data ? `
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Full Error Data</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${dataId}">📋 Copy</button>
-                        <button class="btn btn-open-tab" data-target="${dataId}" data-title="Error Data">📄 Open in Tab</button>
-                    </div>
-                </div>
+                <div class="section-title">Full Error Data</div>
                 <details>
                     <summary>Complete Error Information</summary>
-                    <div class="code-block" id="${dataId}">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                    ${this.renderJsonBlock(data.data, errorDataId, { label: 'Error Data', open: false, openInTab: true })}
                 </details>
             </div>
             ` : ''}
@@ -1231,8 +1235,7 @@ export class StepDetailsPanel {
     }
 
     private renderGeneric(data: StepProfilerData): string {
-        const dataStr = JSON.stringify(data.data || {}, null, 2);
-        const dataId = `generic-data-${data.id}`;
+        const dataId = this.nextJsonBlockId('generic-data');
 
         return `
             <div class="header">
@@ -1241,15 +1244,10 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-header">
-                    <div class="section-title">Data</div>
-                    <div class="actions">
-                        <button class="btn btn-copy" data-target="${dataId}">📋 Copy</button>
-                    </div>
-                </div>
+                <div class="section-title">Data</div>
                 <details open>
                     <summary>Details</summary>
-                    <div class="code-block" id="${dataId}">${escapeHtml(dataStr)}</div>
+                    ${this.renderJsonBlock(data.data || {}, dataId, { label: 'Data', openInTab: true })}
                 </details>
             </div>
         `;

@@ -65,7 +65,7 @@ func (v *ContextMapViewer) build() {
 	// Status bar
 	v.statusBar = tview.NewTextView()
 	v.statusBar.SetDynamicColors(true)
-	v.statusBar.SetText(" [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]j/k[-] Scroll  [yellow]g/G[-] Top/Bottom  [yellow]Esc[-] Close")
+	v.statusBar.SetText(" [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]j/k[-] Scroll  [yellow]g/G[-] Top/Bottom  [yellow]y[-] Copy  [yellow]Esc[-] Close")
 
 	// Layout
 	modalContent := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -138,6 +138,9 @@ func (v *ContextMapViewer) setupContentViewInput() {
 				return nil
 			case 'q':
 				v.Close()
+				return nil
+			case 'y':
+				v.copyToClipboard()
 				return nil
 			}
 		}
@@ -299,7 +302,7 @@ func (v *ContextMapViewer) updateStatusBar() {
 	} else if v.searchTerm != "" {
 		v.statusBar.SetText(" [red]No matches[-]  [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]j/k[-] Scroll  [yellow]Esc[-] Close")
 	} else {
-		v.statusBar.SetText(" [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]j/k[-] Scroll  [yellow]g/G[-] Top/Bottom  [yellow]Esc[-] Close")
+		v.statusBar.SetText(" [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]j/k[-] Scroll  [yellow]g/G[-] Top/Bottom  [yellow]y[-] Copy  [yellow]Esc[-] Close")
 	}
 }
 
@@ -329,6 +332,15 @@ func (v *ContextMapViewer) Show(title string, data any) {
 	v.app.SetFocus(v.contentView)
 }
 
+// copyToClipboard copies the raw JSON content to the system clipboard via OSC 52
+func (v *ContextMapViewer) copyToClipboard() {
+	if v.rawContent == "" {
+		return
+	}
+	copyToClipboardOSC52(v.rawContent)
+	v.statusBar.SetText(" [green]Copied to clipboard (OSC 52)[-]  [yellow]/[-] Search  [yellow]n/N[-] Next/Prev  [yellow]y[-] Copy  [yellow]Esc[-] Close")
+}
+
 // Close closes the context map viewer
 func (v *ContextMapViewer) Close() {
 	v.pages.RemovePage("contextmap")
@@ -337,7 +349,7 @@ func (v *ContextMapViewer) Close() {
 	}
 }
 
-// ShowContextMap shows the context map for the given event data
+// ShowContextMap shows the context map or data viewer for the given event data
 func (c *ConsoleApp) showContextMapForEvent(data silky.StepProfilerData) {
 	var contextData any
 	var title string
@@ -349,6 +361,32 @@ func (c *ConsoleApp) showContextMapForEvent(data silky.StepProfilerData) {
 	case silky.EVENT_CONTEXT_SELECTION, silky.EVENT_CONTEXT_MERGE:
 		contextData = data.Data["fullContextMap"]
 		title = " Context Map "
+	case silky.EVENT_ROOT_START:
+		contextData = data.Data["contextMap"]
+		title = " Context Map "
+	case silky.EVENT_REQUEST_RESPONSE:
+		contextData = data.Data["body"]
+		title = " Response Body "
+	case silky.EVENT_RESPONSE_TRANSFORM:
+		contextData = data.Data["afterResponse"]
+		title = " Transformed Response "
+	case silky.EVENT_ITEM_SELECTION:
+		contextData = data.Data["itemValue"]
+		title = " Item Value "
+	case silky.EVENT_RESULT, silky.EVENT_STREAM_RESULT:
+		if r, ok := data.Data["result"]; ok {
+			contextData = r
+			title = " Result "
+		} else if e, ok := data.Data["entity"]; ok {
+			contextData = e
+			title = " Stream Entity "
+		}
+	case silky.EVENT_ERROR:
+		contextData = data.Data
+		title = " Error Data "
+	case silky.EVENT_PAGINATION_EVAL:
+		contextData = data.Data["previousResponse"]
+		title = " Previous Response "
 	default:
 		return
 	}

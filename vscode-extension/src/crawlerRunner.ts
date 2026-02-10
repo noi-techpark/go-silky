@@ -65,7 +65,7 @@ export class CrawlerRunner {
 
                     if (usingBundled) {
                         // Using bundled binary
-                        const binaryPath = path.join(idePath, 'silky');
+                        const binaryPath = path.join(idePath, this.getBinaryName());
                         command = binaryPath;
                         args = ['-config', configPath, '-profiler'];
                         if (variables && Object.keys(variables).length > 0) {
@@ -206,7 +206,7 @@ export class CrawlerRunner {
 
                 if (usingBundled) {
                     // Using bundled binary
-                    const binaryPath = path.join(idePath, 'silky');
+                    const binaryPath = path.join(idePath, this.getBinaryName());
                     command = binaryPath;
                     args = ['-config', configPath, '-validate'];
                     cwd = path.dirname(configPath);
@@ -255,6 +255,22 @@ export class CrawlerRunner {
         this.stop();
         this.outputChannel.dispose();
         this.diagnosticCollection.dispose();
+    }
+
+    private getBinaryName(): string {
+        const platformMap: Record<string, string> = {
+            'darwin': 'darwin',
+            'linux': 'linux',
+            'win32': 'windows',
+        };
+        const archMap: Record<string, string> = {
+            'x64': 'amd64',
+            'arm64': 'arm64',
+        };
+        const goos = platformMap[process.platform] || process.platform;
+        const goarch = archMap[process.arch] || process.arch;
+        const ext = process.platform === 'win32' ? '.exe' : '';
+        return `silky-${goos}-${goarch}${ext}`;
     }
 
     private tryParseProfilerData(line: string): boolean {
@@ -433,7 +449,7 @@ export class CrawlerRunner {
         const fs = require('fs').promises;
 
         // Strategy 1: Check if bundled binary exists
-        const bundledBinary = path.join(this.context.extensionPath, 'bin', 'silky');
+        const bundledBinary = path.join(this.context.extensionPath, 'bin', this.getBinaryName());
         try {
             await fs.access(bundledBinary);
             this.outputChannel.appendLine(`Using bundled binary: ${bundledBinary}`);

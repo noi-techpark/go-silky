@@ -1,0 +1,156 @@
+/*
+ * SPDX-FileCopyrightText: 2024 NOI Techpark <digital@noi.bz.it>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+/* JSON Tree styles */
+
+.json-tree-wrapper {
+    margin: 10px 0;
+}
+
+.json-tree-toolbar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.json-tree-toolbar .btn {
+    font-size: 0.8em;
+    padding: 2px 8px;
+}
+
+.json-tree {
+    background: var(--vscode-textCodeBlock-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    padding: 8px 12px;
+    overflow: auto;
+    max-height: 600px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+/* Reset list styles */
+.jt-root,
+.jt-children {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.jt-children {
+    padding-left: 20px;
+}
+
+.jt-node {
+    margin: 0;
+}
+
+.jt-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0;
+    white-space: nowrap;
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.jt-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.jt-row:hover > .jt-copy-btn {
+    opacity: 1;
+}
+
+/* Toggle arrow */
+.jt-toggle {
+    display: inline-block;
+    width: 14px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--vscode-descriptionForeground);
+    flex-shrink: 0;
+}
+
+.jt-toggle:hover {
+    color: var(--vscode-foreground);
+}
+
+/* Spacer for leaf nodes to align with toggled nodes */
+.jt-spacer {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+/* Key */
+.jt-key {
+    color: var(--vscode-textLink-foreground);
+}
+
+.jt-colon {
+    color: var(--vscode-descriptionForeground);
+    white-space: pre;
+}
+
+/* Preview (collapsed summary) */
+.jt-preview {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+/* Values by type */
+.jt-value.jt-string {
+    color: var(--vscode-debugTokenExpression-string, #6a9955);
+}
+
+.jt-value.jt-number {
+    color: var(--vscode-debugTokenExpression-number, #4fc1ff);
+}
+
+.jt-value.jt-boolean {
+    color: var(--vscode-debugTokenExpression-boolean, #ce9178);
+}
+
+.jt-value.jt-null {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+}
+
+/* Per-node copy button (visible on hover) */
+.jt-copy-btn {
+    opacity: 0;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 0px 5px;
+    cursor: pointer;
+    border-radius: 2px;
+    font-size: 0.75em;
+    margin-left: 8px;
+    transition: opacity 0.15s;
+}
+
+.jt-copy-btn:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+/* "Show more" for truncated arrays */
+.jt-show-more {
+    background: none;
+    border: 1px solid var(--vscode-button-background);
+    color: var(--vscode-textLink-foreground);
+    padding: 2px 10px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.85em;
+    margin: 4px 0;
+}
+
+.jt-show-more:hover {
+    background: var(--vscode-list-hoverBackground);
+}

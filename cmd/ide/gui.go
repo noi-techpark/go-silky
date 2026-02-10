@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -102,7 +103,7 @@ func isEndEvent(t silky.ProfileEventType) bool {
 		t == silky.EVENT_AUTH_LOGIN_END
 }
 
-// hasContextMapData returns true if the event contains context/template map data
+// hasContextMapData returns true if the event contains viewable JSON data for the [m] viewer
 func hasContextMapData(data silky.StepProfilerData) bool {
 	switch data.Type {
 	case silky.EVENT_URL_COMPOSITION:
@@ -110,6 +111,29 @@ func hasContextMapData(data silky.StepProfilerData) bool {
 		return ok
 	case silky.EVENT_CONTEXT_SELECTION, silky.EVENT_CONTEXT_MERGE:
 		_, ok := data.Data["fullContextMap"]
+		return ok
+	case silky.EVENT_ROOT_START:
+		_, ok := data.Data["contextMap"]
+		return ok
+	case silky.EVENT_REQUEST_RESPONSE:
+		_, ok := data.Data["body"]
+		return ok
+	case silky.EVENT_RESPONSE_TRANSFORM:
+		_, ok := data.Data["afterResponse"]
+		return ok
+	case silky.EVENT_ITEM_SELECTION:
+		_, ok := data.Data["itemValue"]
+		return ok
+	case silky.EVENT_RESULT, silky.EVENT_STREAM_RESULT:
+		if _, ok := data.Data["result"]; ok {
+			return true
+		}
+		_, ok := data.Data["entity"]
+		return ok
+	case silky.EVENT_ERROR:
+		return len(data.Data) > 0
+	case silky.EVENT_PAGINATION_EVAL:
+		_, ok := data.Data["previousResponse"]
 		return ok
 	}
 	return false
@@ -141,19 +165,21 @@ func getHelpText() string {
   [yellow]2[-]             Show "After" data
   [yellow]3[-]             Show "Diff" (word-based)
 
-[green::b]Context Map View[-:-:-]
-  [yellow]m[-]             Open context/template map viewer (when available)
-  [yellow]/[-]             Search in context map (when viewer open)
+[green::b]Data Viewer[-:-:-]
+  [yellow]m[-]             Open data viewer for JSON data (when available)
+  [yellow]/[-]             Search in viewer (when viewer open)
   [yellow]n[-]             Next search match
   [yellow]N[-]             Previous search match
-  [yellow]Esc[-]           Close context map viewer
+  [yellow]y[-]             Copy content to clipboard (OSC 52)
+  [yellow]Esc[-]           Close data viewer
 
 [green::b]Runtime Variables[-:-:-]
   [yellow]v[-]             Set runtime variables (JSON)
   Variables are accessible as {{ .varName }} in templates
   and as $ctx.varName in jq expressions
 
-[green::b]View Controls[-:-:-]
+[green::b]Clipboard & View[-:-:-]
+  [yellow]y[-]             Copy step details to clipboard (OSC 52)
   [yellow]Tab[-]           Switch focus between panels
   [yellow]?[-]             Toggle this help panel
   [yellow]d[-]             Dump steps to /out folder
@@ -528,6 +554,9 @@ func (c *ConsoleApp) gotoIDE(path string) {
 			case 'v':
 				c.showVariablesModal()
 				return nil
+			case 'y':
+				c.copyStepDetailsToClipboard()
+				return nil
 			}
 		case tcell.KeyEscape:
 			// Close context map if open (let it handle its own close)
@@ -858,11 +887,11 @@ func (c *ConsoleApp) showVariablesModal() {
 
 func (c *ConsoleApp) updateStatusBar() {
 	// Base status bar text
-	statusText := " [yellow]?[-] Help  [yellow]v[-] Vars  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse"
+	statusText := " [yellow]?[-] Help  [yellow]v[-] Vars  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse  [yellow]y[-] Copy"
 
 	// Add context map shortcut if current event has context data
 	if hasContextMapData(c.currentEventData) {
-		statusText += "  [black:cyan] m [-:-:-] Context Map"
+		statusText += "  [black:cyan] m [-:-:-] Data Viewer"
 	}
 
 	c.statusBar.SetText(statusText)
@@ -1436,6 +1465,30 @@ func (c *ConsoleApp) formatError(sb *strings.Builder, data silky.StepProfilerDat
 		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
 		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
 	}
+}
+
+// copyToClipboardOSC52 uses OSC 52 escape sequence to copy text to the system clipboard.
+// Works in most modern terminals (iTerm2, kitty, alacritty, Windows Terminal, ghostty).
+func copyToClipboardOSC52(text string) {
+	encoded := base64Encode([]byte(text))
+	// Write OSC 52 escape sequence to stdout
+	fmt.Fprintf(os.Stdout, "\033]52;c;%s\a", encoded)
+}
+
+// base64Encode encodes bytes to base64 string
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+// copyStepDetailsToClipboard copies the current step details text (stripped of tview color tags) to clipboard
+func (c *ConsoleApp) copyStepDetailsToClipboard() {
+	text := c.stepDetails.GetText(true) // true = strip color tags
+	if text == "" {
+		c.appendLog("[yellow]Nothing to copy")
+		return
+	}
+	copyToClipboardOSC52(text)
+	c.appendLog("[green]Step details copied to clipboard (OSC 52)")
 }
 
 func (c *ConsoleApp) appendLog(log string) {
