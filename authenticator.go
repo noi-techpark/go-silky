@@ -811,9 +811,7 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 		}
 	case "query":
 		if a.token != "" {
-			q := req.URL.Query()
-			q.Set(a.injectKey, a.token)
-			req.URL.RawQuery = q.Encode()
+			SetQueryParams(req.URL, map[string]string{a.injectKey: a.token})
 			a.profiler.emit(EVENT_AUTH_TOKEN_INJECT, "Credential Injected", requestID, map[string]any{
 				"location": "Query parameter",
 				"queryKey": a.injectKey,

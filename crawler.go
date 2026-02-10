@@ -707,6 +707,18 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		return fmt.Errorf("path extraction failed: %w", err)
 	}
 
+	// Filter nil items - jq returns null for missing paths, which is meaningless for forEach
+	filtered := make([]interface{}, 0, len(results))
+	for _, item := range results {
+		if item != nil {
+			filtered = append(filtered, item)
+		}
+	}
+	if skipped := len(results) - len(filtered); skipped > 0 {
+		c.logger.Debug("[ForEach] Skipped %d nil items from path extraction '%s'", skipped, exec.step.Path)
+	}
+	results = filtered
+
 	// Determine execution mode and parameters
 	var executionResults []interface{}
 
@@ -1006,12 +1018,15 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		}
 	}
 
-	// Add query parameters
-	query := urlObj.Query()
-	for k, v := range ctx.queryParams {
-		query.Set(k, v)
+	// Normalize existing query string (e.g., unencoded spaces from template expansion,
+	// or '#' and '+' in externally-sourced URLs like nextPageUrl)
+	if urlObj.RawQuery != "" {
+		urlObj.RawQuery = NormalizeRawQuery(urlObj.RawQuery)
 	}
-	urlObj.RawQuery = query.Encode()
+
+	// Add pagination query parameters using RFC 3986 encoding.
+	// This preserves existing params as-is (no decode/re-encode round-trip).
+	SetQueryParams(urlObj, ctx.queryParams)
 
 	// Merge configured body with pagination body params
 	mergedBody := make(map[string]any)

@@ -1100,6 +1100,35 @@ func TestNestedMergeToAncestorContext(t *testing.T) {
 	assert.Equal(t, expected, data)
 }
 
+func TestForEachNilItemSkip(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/resorts":        "testdata/crawler/foreach_nil_skip/resorts.json",
+		"https://api.example.com/slopes/slope1":  "testdata/crawler/foreach_nil_skip/slope_slope1.json",
+		"https://api.example.com/slopes/slope2":  "testdata/crawler/foreach_nil_skip/slope_slope2.json",
+	})
+
+	craw, validationErrors, err := NewApiCrawler("testdata/crawler/foreach_nil_skip.yaml")
+	if err != nil {
+		for _, ve := range validationErrors {
+			t.Logf("Validation error: %v", ve)
+		}
+	}
+	require.Nil(t, err, "Failed to load crawler config")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err, "Run should not panic or error on nil forEach items")
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/foreach_nil_skip/output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
 func TestStreamingForValues(t *testing.T) {
 	// Tests streaming with forValues - each iteration emits a structure
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{

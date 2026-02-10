@@ -1,0 +1,31 @@
+rootContext: []
+
+steps:
+  - type: request
+    name: Get Resorts
+    request:
+      url: https://api.example.com/resorts
+      method: GET
+    resultTransformer: '.resorts'
+    mergeOn: '. = $res'
+
+  - type: forEach
+    name: Iterate Resorts
+    path: .
+    as: resort
+    steps:
+      # This forEach iterates over .skiSlope which may be null/missing on some resorts
+      - type: forEach
+        name: Iterate Ski Slopes
+        path: .skiSlopes
+        as: slope
+        noopMerge: true
+        steps:
+          - type: request
+            name: Get Slope Details
+            request:
+              url: https://api.example.com/slopes/{{ .slope.id }}
+              method: GET
+            mergeWithContext:
+              name: resort
+              rule: '.slopeDetails = ((.slopeDetails // []) + [$res])'

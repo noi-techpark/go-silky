@@ -1,0 +1,21 @@
+# Test: nextPageUrlSelector should normalize URL query param encoding
+# Verifies that:
+# - Unencoded '#' in query values is encoded to %23 (not treated as fragment separator)
+# - Literal '+' signs in tokens are preserved (not treated as spaces)
+# - Unencoded spaces in query values get percent-encoded as %20
+# This is the original DiscoverSwiss bug: continuation tokens containing '#' and '+'
+# were destroyed by url.Parse.
+
+configuration:
+  pagination:
+    nextPageUrlSelector: "body:.nextUrl"
+
+httpResults:
+  - body: |
+      {
+        "nextUrl": "https://api.example.com/items?token=abc#def+xyz&filter=hello world"
+      }
+  - body: "{}"
+
+paginationState:
+  - nextPageUrl: "https://api.example.com/items?token=abc%23def+xyz&filter=hello%20world"

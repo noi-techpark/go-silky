@@ -345,6 +345,13 @@ func normalizeMapKeys(input map[string]string) map[string]string {
 	return output
 }
 
+// rfc3986Encode percent-encodes a query parameter value per RFC 3986
+// (space = %20, not +). This is a local copy because importing silky
+// from the testing package would create a circular dependency.
+func rfc3986Encode(value string) string {
+	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+}
+
 // Normalize URL by sorting query params and stripping trailing slash
 func normalizeURL(u *url.URL) string {
 	base := u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/")
@@ -353,7 +360,7 @@ func normalizeURL(u *url.URL) string {
 	var sorted []string
 	for k, vs := range params {
 		for _, v := range vs {
-			sorted = append(sorted, url.QueryEscape(k)+"="+url.QueryEscape(v))
+			sorted = append(sorted, rfc3986Encode(k)+"="+rfc3986Encode(v))
 		}
 	}
 	sort.Strings(sorted)

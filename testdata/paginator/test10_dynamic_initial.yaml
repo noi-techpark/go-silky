@@ -1,0 +1,52 @@
+# Test: Dynamic params should NOT appear on the first request (before any response)
+# On the first call, the dynamic param has no value yet and should be skipped entirely.
+# After the first response, the dynamic param should be populated from the response body.
+
+configuration:
+  pagination:
+    params:
+      - name: offset
+        location: query
+        type: int
+        default: "0"
+        increment: "+ 10"
+
+      - name: continuationToken
+        location: query
+        type: dynamic
+        source: body:.nextToken
+
+    stopOn:
+      - type: responseBody
+        expression: ".nextToken == null"
+
+httpResults:
+  - body: |
+      {
+        "nextToken": "abc123",
+        "items": [1, 2, 3]
+      }
+
+  - body: |
+      {
+        "nextToken": "def456",
+        "items": [4, 5, 6]
+      }
+
+  - body: |
+      {
+        "nextToken": null,
+        "items": [7]
+      }
+
+paginationState:
+  - queryParams:
+      offset: "10"
+      continuationToken: "abc123"
+
+  - queryParams:
+      offset: "20"
+      continuationToken: "def456"
+
+initialState:
+  offset: 0

@@ -198,3 +198,47 @@ func TestNextUrlSelector(t *testing.T) {
 func TestStopOnPageNum(t *testing.T) {
 	runPaginatorTest(t, "testdata/paginator/test9_stop_on_iteration.yaml", 3)
 }
+
+func TestDynamicParamInitialState(t *testing.T) {
+	// Verify that dynamic params are absent from the first request (before any response)
+	p, err := NewPaginator(ConfigP{
+		Pagination: Pagination{
+			Params: []Param{
+				{
+					Name:      "offset",
+					Location:  "query",
+					Type:      "int",
+					Default:   "0",
+					Increment: "+ 10",
+				},
+				{
+					Name:     "continuationToken",
+					Location: "query",
+					Type:     "dynamic",
+					Source:   "body:.nextToken",
+				},
+			},
+			StopOn: []StopCondition{
+				{
+					Type:       "responseBody",
+					Expression: ".nextToken == null",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// On the first call, dynamic param should NOT be in the request parts
+	initial := p.NextFromCtx()
+	assert.Equal(t, "0", initial.QueryParams["offset"], "offset should be present")
+	_, hasContinuationToken := initial.QueryParams["continuationToken"]
+	assert.False(t, hasContinuationToken, "continuationToken should not be present on first request")
+}
+
+func TestDynamicParamLifecycle(t *testing.T) {
+	runPaginatorTest(t, "testdata/paginator/test10_dynamic_initial.yaml", 3)
+}
+
+func TestNextUrlEncodingLifecycle(t *testing.T) {
+	runPaginatorTest(t, "testdata/paginator/test11_next_url_encoding.yaml", 2)
+}

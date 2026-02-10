@@ -1,0 +1,26 @@
+[
+  {
+    "id": "resort1",
+    "name": "Alpine Resort",
+    "skiSlopes": [
+      { "id": "slope1", "name": "Easy Run" }
+    ],
+    "slopeDetails": [
+      { "id": "slope1", "difficulty": "easy", "length": 500 }
+    ]
+  },
+  {
+    "id": "resort2",
+    "name": "Beach Resort"
+  },
+  {
+    "id": "resort3",
+    "name": "Mountain Resort",
+    "skiSlopes": [
+      { "id": "slope2", "name": "Hard Run" }
+    ],
+    "slopeDetails": [
+      { "id": "slope2", "difficulty": "hard", "length": 2000 }
+    ]
+  }
+]

@@ -254,7 +254,7 @@ func (p *Paginator) extractNextUrl(body interface{}, headers map[string][]string
 			return fmt.Errorf("jq error for next url: %w", err)
 		}
 		if casted, ok := val.(string); ok {
-			p.nextPageUrl = casted
+			p.nextPageUrl = NormalizeURL(casted)
 		} else {
 			p.nextPageUrl = ""
 		}
@@ -264,7 +264,7 @@ func (p *Paginator) extractNextUrl(body interface{}, headers map[string][]string
 			return fmt.Errorf("missing header key for next url")
 		}
 		if val, ok := headers[sourcePath]; ok && len(val) > 0 {
-			p.nextPageUrl = val[0]
+			p.nextPageUrl = NormalizeURL(val[0])
 		} else {
 			p.nextPageUrl = ""
 		}
@@ -530,7 +530,10 @@ func (p *Paginator) NextFromCtx() *RequestParts {
 	b := make(map[string]interface{})
 
 	for _, param := range p.config.Pagination.Params {
-		val := p.ctx[param.Name]
+		val, exists := p.ctx[param.Name]
+		if param.Type == "dynamic" && !exists {
+			continue
+		}
 		switch param.Location {
 		case "query":
 			q[param.Name] = fmt.Sprintf("%v", val)
@@ -595,3 +598,4 @@ func (p *Paginator) Next(resp *http.Response) (*RequestParts, bool, error) {
 
 	return p.NextFromCtx(), false, nil
 }
+
