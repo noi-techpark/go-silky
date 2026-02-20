@@ -7,7 +7,7 @@ replace github.com/noi-techpark/go-silky => ../..
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gdamore/tcell/v2 v2.9.0
-	github.com/noi-techpark/go-silky v1.0.7
+	github.com/noi-techpark/go-silky v1.0.8
 	github.com/rivo/tview v0.42.0
 	github.com/sergi/go-diff v1.4.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -16,7 +16,7 @@ require (
 require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
-	github.com/expr-lang/expr v1.17.7 // indirect
+	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/itchyny/gojq v0.12.18 // indirect
