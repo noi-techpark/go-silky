@@ -5,7 +5,10 @@
 package silky
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -755,6 +758,52 @@ func TestAuthMixedOverride(t *testing.T) {
 	require.True(t, ok, "Result should be a map")
 	require.NotNil(t, resultMap["stats"], "Should have stats")
 	require.NotNil(t, resultMap["reports"], "Should have reports")
+}
+
+func TestAuthCustomBodyToBody(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/auth/token": "testdata/crawler/auth_custom_body_to_body/authenticate_response.json",
+		"https://api.example.com/data":       "testdata/crawler/auth_custom_body_to_body/data_response.json",
+	})
+
+	// Verify that the data request contains the injected token in its body
+	mockTransport.InterceptFunc = func(req *http.Request, resp *http.Response) {
+		if req.URL.Path == "/data" {
+			// Read and verify body contains the injected token
+			bodyBytes, err := io.ReadAll(req.Body)
+			if err != nil {
+				return
+			}
+			// Restore body for the response to work
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			var body map[string]any
+			if err := json.Unmarshal(bodyBytes, &body); err != nil {
+				return
+			}
+
+			// Verify token was injected
+			if body["api_token"] != "secret-body-token-abc" {
+				panic("Expected api_token in request body")
+			}
+			// Verify original fields preserved
+			if body["query"] != "search" {
+				panic("Expected query field preserved in body")
+			}
+		}
+	}
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/auth_custom_body_to_body.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+	require.NotNil(t, resultMap["result"], "Should have result key from mergeOn")
 }
 
 // Request "as" Property Tests

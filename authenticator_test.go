@@ -5,8 +5,12 @@
 package silky
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -547,4 +551,231 @@ func TestOAuthAuthenticatorTokenRefresh(t *testing.T) {
 	assert.Contains(t, req2.Header.Get("Authorization"), "refreshed-oauth-token")
 
 	assert.Equal(t, 2, tokenCount, "Should have fetched token twice (initial + refresh)")
+}
+
+func TestCustomAuthenticatorBodyInjectionJSON(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"api_key": "injected-token-123",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".api_key",
+		InjectInto:      "body",
+		InjectKey:       "token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with existing JSON body
+	originalBody := map[string]any{"query": "test", "limit": float64(10)}
+	bodyBytes, _ := json.Marshal(originalBody)
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	// Read back the modified body
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	var resultBody map[string]any
+	err = json.Unmarshal(resultBytes, &resultBody)
+	require.Nil(t, err)
+
+	// Original fields preserved
+	assert.Equal(t, "test", resultBody["query"])
+	assert.Equal(t, float64(10), resultBody["limit"])
+	// Token injected
+	assert.Equal(t, "injected-token-123", resultBody["token"])
+	// Content-Type unchanged
+	assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+}
+
+func TestCustomAuthenticatorBodyInjectionFormEncoded(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"api_key": "form-token-456",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".api_key",
+		InjectInto:      "body",
+		InjectKey:       "token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with existing form-encoded body
+	formData := url.Values{}
+	formData.Set("query", "test")
+	formData.Set("limit", "10")
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", strings.NewReader(formData.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	// Read back the modified body
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	resultValues, err := url.ParseQuery(string(resultBytes))
+	require.Nil(t, err)
+
+	// Original fields preserved
+	assert.Equal(t, "test", resultValues.Get("query"))
+	assert.Equal(t, "10", resultValues.Get("limit"))
+	// Token injected
+	assert.Equal(t, "form-token-456", resultValues.Get("token"))
+}
+
+func TestCustomAuthenticatorBodyInjectionNoExistingBody(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"api_key": "new-body-token-789",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".api_key",
+		InjectInto:      "body",
+		InjectKey:       "token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with NO body but with Content-Type set
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	// Read back the new body
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	var resultBody map[string]any
+	err = json.Unmarshal(resultBytes, &resultBody)
+	require.Nil(t, err)
+
+	// Token is the only field
+	assert.Equal(t, "new-body-token-789", resultBody["token"])
+	assert.Len(t, resultBody, 1)
+	assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+}
+
+func TestCustomAuthenticatorBodyInjectionNoContentType(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"api_key": "some-token",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".api_key",
+		InjectInto:      "body",
+		InjectKey:       "token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Request with no body and no Content-Type → should error
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", nil)
+
+	err := auth.PrepareRequest(req, "")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "Content-Type header is required")
+}
+
+func TestCustomAuthenticatorBodyInjectionEmptyToken(t *testing.T) {
+	// Login returns empty token
+	loginResponse := map[string]interface{}{
+		"api_key": "",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".api_key",
+		InjectInto:      "body",
+		InjectKey:       "token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with existing JSON body
+	originalBody := map[string]any{"query": "test"}
+	bodyBytes, _ := json.Marshal(originalBody)
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	// Body should NOT be modified (empty token = skip injection)
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	var resultBody map[string]any
+	err = json.Unmarshal(resultBytes, &resultBody)
+	require.Nil(t, err)
+
+	// Only original field, no token injected
+	assert.Equal(t, "test", resultBody["query"])
+	assert.NotContains(t, resultBody, "token")
 }

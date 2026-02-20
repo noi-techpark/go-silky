@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -819,12 +820,19 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 			})
 		}
 	case "body":
-		// Note: This modifies the request body which may be tricky
-		// For now, we'll skip this case or implement it later
-		a.profiler.emit(EVENT_AUTH_END, "Custom Auth Failed", requestID, map[string]any{
-			"error": "injectInto=body not yet implemented",
-		})
-		return fmt.Errorf("injectInto=body not yet implemented")
+		if a.token != "" {
+			if err := a.injectTokenIntoBody(req); err != nil {
+				a.profiler.emit(EVENT_AUTH_END, "Custom Auth Failed", requestID, map[string]any{
+					"error": err.Error(),
+				})
+				return fmt.Errorf("body injection failed: %w", err)
+			}
+			a.profiler.emit(EVENT_AUTH_TOKEN_INJECT, "Credential Injected", requestID, map[string]any{
+				"location": "Request body",
+				"bodyKey":  a.injectKey,
+				"token":    maskToken(a.token),
+			})
+		}
 	default:
 		a.profiler.emit(EVENT_AUTH_END, "Custom Auth Failed", requestID, map[string]any{
 			"error": fmt.Sprintf("unsupported injectInto: %s", a.injectInto),
@@ -952,6 +960,76 @@ func (a *CustomAuthenticator) extractCredential(resp *http.Response, requestID s
 	default:
 		return fmt.Errorf("unsupported extractFrom: %s", a.extractFrom)
 	}
+}
+
+// injectTokenIntoBody reads the existing request body (if any), injects the auth token
+// as a new field, re-encodes it, and replaces req.Body.
+func (a *CustomAuthenticator) injectTokenIntoBody(req *http.Request) error {
+	contentType := req.Header.Get("Content-Type")
+	bodyMap := make(map[string]any)
+
+	if contentType == "" {
+		return fmt.Errorf("cannot inject into body: Content-Type header is required when body is present")
+	}
+
+	if req.Body != nil {
+		bodyBytes, err := io.ReadAll(req.Body)
+		req.Body.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read request body: %w", err)
+		}
+
+		if len(bodyBytes) > 0 {
+			switch contentType {
+			case "application/json":
+				if err := json.Unmarshal(bodyBytes, &bodyMap); err != nil {
+					return fmt.Errorf("failed to decode JSON body: %w", err)
+				}
+			case "application/x-www-form-urlencoded":
+				values, err := url.ParseQuery(string(bodyBytes))
+				if err != nil {
+					return fmt.Errorf("failed to parse form body: %w", err)
+				}
+				for k, v := range values {
+					if len(v) == 1 {
+						bodyMap[k] = v[0]
+					} else {
+						bodyMap[k] = v
+					}
+				}
+			}
+		}
+	}
+
+	// Inject the token
+	bodyMap[a.injectKey] = a.token
+
+	// Re-encode
+	var newBytes []byte
+	switch contentType {
+	case "application/json":
+		encoded, err := json.Marshal(bodyMap)
+		if err != nil {
+			return fmt.Errorf("failed to encode JSON body: %w", err)
+		}
+		newBytes = encoded
+	case "application/x-www-form-urlencoded":
+		formData := url.Values{}
+		for k, v := range bodyMap {
+			formData.Set(k, fmt.Sprintf("%v", v))
+		}
+		newBytes = []byte(formData.Encode())
+	default:
+		return fmt.Errorf("cannot inject into body with content type: %s", contentType)
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(newBytes))
+	req.ContentLength = int64(len(newBytes))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(newBytes)), nil
+	}
+
+	return nil
 }
 
 func (a *CustomAuthenticator) getOrCompileJQ(expression string) (*gojq.Code, error) {

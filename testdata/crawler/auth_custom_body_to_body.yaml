@@ -1,0 +1,34 @@
+# Test: Custom Authentication (Body to Body)
+# This test extracts an access token from login response body
+# and injects it into the request body of subsequent API calls
+
+rootContext: {}
+
+auth:
+  type: custom
+  loginRequest:
+    url: https://api.example.com/auth/token
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      client_id: my_client
+      client_secret: my_secret
+  extractFrom: body
+  extractSelector: .access_token
+  injectInto: body
+  injectKey: api_token
+  maxAgeSeconds: 3600
+
+steps:
+  - type: request
+    name: "Fetch data with token in body"
+    request:
+      url: https://api.example.com/data
+      method: POST
+      headers:
+        Content-Type: application/json
+      body:
+        query: "search"
+        limit: 10
+    mergeOn: .result = $res
