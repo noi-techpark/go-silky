@@ -1642,6 +1642,8 @@ func (c *ConsoleApp) onConfigFileChanged() {
 		return
 	}
 
+	data = []byte(silky.ExpandEnv(string(data)))
+
 	var cfg silky.Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {

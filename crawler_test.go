@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	crawler_testing "github.com/noi-techpark/go-silky/testing"
@@ -1231,4 +1233,103 @@ func TestStreamingForValues(t *testing.T) {
 		require.NotNil(t, forecast["temperature"], "forecast should have temperature")
 		require.NotNil(t, forecast["conditions"], "forecast should have conditions")
 	}
+}
+
+func TestEnvVarExpansionInConfig(t *testing.T) {
+	// Set env vars for the test
+	os.Setenv("TEST_SILKY_HOST", "https://api.example.com")
+	os.Setenv("TEST_SILKY_TOKEN", "my-secret-token")
+	defer os.Unsetenv("TEST_SILKY_HOST")
+	defer os.Unsetenv("TEST_SILKY_TOKEN")
+
+	// Write a temp YAML config that uses env vars
+	configContent := `
+rootContext: []
+headers:
+  Authorization: "Bearer ${TEST_SILKY_TOKEN}"
+steps:
+  - type: request
+    name: "Fetch data"
+    request:
+      url: "${TEST_SILKY_HOST}/data"
+      method: GET
+    resultTransformer: .items
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	// Mock transport expects the expanded URL
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/data": map[string]interface{}{
+			"items": []interface{}{
+				map[string]interface{}{"id": 1, "name": "Item A"},
+				map[string]interface{}{"id": 2, "name": "Item B"},
+			},
+		},
+	})
+
+	// Verify the Authorization header was expanded
+	mockTransport.InterceptFunc = func(req *http.Request, resp *http.Response) {
+		if req.URL.Path == "/data" {
+			authHeader := req.Header.Get("Authorization")
+			if authHeader != "Bearer my-secret-token" {
+				panic("Expected expanded Authorization header, got: " + authHeader)
+			}
+		}
+	}
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	assert.Len(t, resultArray, 2)
+}
+
+func TestEnvVarExpansionWithDefaults(t *testing.T) {
+	// Intentionally NOT setting TEST_SILKY_MISSING to test default values
+	os.Unsetenv("TEST_SILKY_MISSING")
+
+	configContent := `
+rootContext: []
+steps:
+  - type: request
+    name: "Fetch from default URL"
+    request:
+      url: "${TEST_SILKY_MISSING:-https://fallback.example.com}/items"
+      method: GET
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://fallback.example.com/items": []interface{}{
+			map[string]interface{}{"id": 1},
+		},
+	})
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	assert.Len(t, resultArray, 1)
 }

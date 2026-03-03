@@ -141,6 +141,8 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		return nil, nil, err
 	}
 
+	data = []byte(ExpandEnv(string(data)))
+
 	var cfg Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {

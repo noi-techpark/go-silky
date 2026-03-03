@@ -230,6 +230,37 @@ These options are mutually exclusive - only one can be specified per step.
 
 ---
 
+## Environment Variable Expansion
+
+Silky expands environment variables in YAML configuration files before parsing. This allows you to reference secrets, URLs, and environment-specific values without hardcoding them.
+
+### Syntax
+
+| Syntax | Behavior |
+|--------|----------|
+| `${VAR}` | Replaced with the value of `VAR`, or empty string if unset |
+| `${VAR:-default}` | Replaced with the value of `VAR`, or `default` if unset/empty |
+
+### Example
+
+```yaml
+auth:
+  type: bearer
+  token: "${API_TOKEN}"
+
+steps:
+  - type: request
+    request:
+      url: "${API_HOST:-https://api.example.com}/v1/data"
+      method: GET
+    headers:
+      X-Custom-Key: "${CUSTOM_KEY}"
+```
+
+Expansion happens on the raw YAML text before parsing, so it works in any field (URLs, headers, body values, auth config, etc.).
+
+---
+
 ## Runtime Variables
 
 Silky supports runtime variables that can be injected into your configuration at execution time. This allows you to:
