@@ -779,3 +779,110 @@ func TestCustomAuthenticatorBodyInjectionEmptyToken(t *testing.T) {
 	assert.Equal(t, "test", resultBody["query"])
 	assert.NotContains(t, resultBody, "token")
 }
+
+func TestCustomAuthenticatorBodyInjectionNestedKey(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"SubscribeResult": map[string]interface{}{
+			"sessionId": "sess-abc-123",
+		},
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/subscribe": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/subscribe",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".SubscribeResult.sessionId",
+		InjectInto:      "body",
+		InjectKey:       "request.sessionId",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with existing nested JSON body
+	originalBody := map[string]any{
+		"request": map[string]any{
+			"query": "test",
+		},
+	}
+	bodyBytes, _ := json.Marshal(originalBody)
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	// Read back the modified body
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	var resultBody map[string]any
+	err = json.Unmarshal(resultBytes, &resultBody)
+	require.Nil(t, err)
+
+	// Should inject into nested path: request.sessionId
+	requestObj, ok := resultBody["request"].(map[string]any)
+	require.True(t, ok, "request field should be a map")
+	assert.Equal(t, "sess-abc-123", requestObj["sessionId"])
+	// Original nested field preserved
+	assert.Equal(t, "test", requestObj["query"])
+}
+
+func TestCustomAuthenticatorBodyInjectionNestedKeyCreatesPath(t *testing.T) {
+	loginResponse := map[string]interface{}{
+		"token": "deep-token-456",
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/auth": loginResponse,
+	})
+
+	client := &http.Client{Transport: mockTransport}
+
+	config := AuthenticatorConfig{
+		Type: "custom",
+		LoginRequest: &RequestConfig{
+			URL:    "https://api.example.com/auth",
+			Method: "POST",
+		},
+		ExtractFrom:     "body",
+		ExtractSelector: ".token",
+		InjectInto:      "body",
+		InjectKey:       "auth.credentials.token",
+	}
+
+	auth := NewAuthenticator(config, client)
+
+	// Create request with empty JSON body (no pre-existing nested structure)
+	originalBody := map[string]any{"query": "search"}
+	bodyBytes, _ := json.Marshal(originalBody)
+	req, _ := http.NewRequest("POST", "https://api.example.com/data", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+
+	err := auth.PrepareRequest(req, "")
+	require.Nil(t, err)
+
+	resultBytes, err := io.ReadAll(req.Body)
+	require.Nil(t, err)
+
+	var resultBody map[string]any
+	err = json.Unmarshal(resultBytes, &resultBody)
+	require.Nil(t, err)
+
+	// Should create nested path: auth.credentials.token
+	authObj, ok := resultBody["auth"].(map[string]any)
+	require.True(t, ok, "auth field should be a map")
+	credsObj, ok := authObj["credentials"].(map[string]any)
+	require.True(t, ok, "credentials field should be a map")
+	assert.Equal(t, "deep-token-456", credsObj["token"])
+	// Original field preserved
+	assert.Equal(t, "search", resultBody["query"])
+}

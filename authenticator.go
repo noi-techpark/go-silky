@@ -962,6 +962,36 @@ func (a *CustomAuthenticator) extractCredential(resp *http.Response, requestID s
 	}
 }
 
+// setNestedValue sets a value in a map using a dotted key path.
+// For example, setNestedValue(m, "request.sessionId", "abc") produces
+// m["request"]["sessionId"] = "abc", creating intermediate maps as needed
+// and preserving existing fields in those maps.
+func setNestedValue(m map[string]any, key string, value any) {
+	parts := strings.Split(key, ".")
+	current := m
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			current[part] = value
+			return
+		}
+		// Navigate or create intermediate map
+		if existing, ok := current[part]; ok {
+			if existingMap, ok := existing.(map[string]any); ok {
+				current = existingMap
+			} else {
+				// Overwrite non-map value with a new map
+				newMap := make(map[string]any)
+				current[part] = newMap
+				current = newMap
+			}
+		} else {
+			newMap := make(map[string]any)
+			current[part] = newMap
+			current = newMap
+		}
+	}
+}
+
 // injectTokenIntoBody reads the existing request body (if any), injects the auth token
 // as a new field, re-encodes it, and replaces req.Body.
 func (a *CustomAuthenticator) injectTokenIntoBody(req *http.Request) error {
@@ -1001,8 +1031,8 @@ func (a *CustomAuthenticator) injectTokenIntoBody(req *http.Request) error {
 		}
 	}
 
-	// Inject the token
-	bodyMap[a.injectKey] = a.token
+	// Inject the token, supporting dotted paths like "request.sessionId"
+	setNestedValue(bodyMap, a.injectKey, a.token)
 
 	// Re-encode
 	var newBytes []byte
