@@ -573,9 +573,9 @@ func TestAuthBearer(t *testing.T) {
 	require.Nil(t, err)
 
 	data := craw.GetData()
-	resultMap, ok := data.(map[string]interface{})
-	require.True(t, ok, "Result should be a map")
-	require.NotNil(t, resultMap, "Should have resources data")
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	require.Len(t, resultArray, 2, "Should have 2 resources")
 }
 
 func TestAuthOAuthPassword(t *testing.T) {
@@ -611,9 +611,9 @@ func TestAuthOAuthClientCredentials(t *testing.T) {
 	require.Nil(t, err)
 
 	data := craw.GetData()
-	resultMap, ok := data.(map[string]interface{})
-	require.True(t, ok, "Result should be a map")
-	require.NotNil(t, resultMap, "Should have API keys data")
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	require.Len(t, resultArray, 2, "Should have 2 API keys")
 }
 
 func TestAuthCookie(t *testing.T) {
@@ -660,9 +660,9 @@ func TestAuthJWTBody(t *testing.T) {
 	require.Nil(t, err)
 
 	data := craw.GetData()
-	resultMap, ok := data.(map[string]interface{})
-	require.True(t, ok, "Result should be a map")
-	require.NotNil(t, resultMap, "Should have protected data")
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	require.Len(t, resultArray, 2, "Should have 2 protected records")
 }
 
 func TestAuthJWTHeader(t *testing.T) {
@@ -716,9 +716,9 @@ func TestAuthCustomCookieToHeader(t *testing.T) {
 	require.Nil(t, err)
 
 	data := craw.GetData()
-	resultMap, ok := data.(map[string]interface{})
-	require.True(t, ok, "Result should be a map")
-	require.NotNil(t, resultMap, "Should have systems data")
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	require.Len(t, resultArray, 2, "Should have 2 systems")
 }
 
 func TestAuthCustomBodyToQuery(t *testing.T) {
@@ -1332,4 +1332,159 @@ steps:
 	resultArray, ok := data.([]interface{})
 	require.True(t, ok, "Result should be an array")
 	assert.Len(t, resultArray, 1)
+}
+
+func TestSprigFunctionsInBody(t *testing.T) {
+	// YAML config using sprig functions in body templates
+	configContent := `
+rootContext: {}
+steps:
+  - type: request
+    name: "Fetch with computed body"
+    request:
+      url: https://api.example.com/query
+      method: POST
+      headers:
+        Content-Type: application/json
+      body:
+        fromData: '{{ printf "/Date(%d000+0000)/" .from }}'
+        toData: '{{ printf "/Date(%d000+0000)/" .to }}'
+        label: '{{ upper .name }}'
+        offset: '{{ add .page 10 }}'
+    mergeOn: .result = $res
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/query": map[string]interface{}{
+			"status": "ok",
+		},
+	})
+
+	// Verify the body contains expanded sprig function results
+	mockTransport.InterceptFunc = func(req *http.Request, resp *http.Response) {
+		if req.URL.Path == "/query" {
+			bodyBytes, _ := io.ReadAll(req.Body)
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			var body map[string]any
+			json.Unmarshal(bodyBytes, &body)
+
+			if body["fromData"] != "/Date(1700000000000+0000)/" {
+				panic("Expected fromData with expanded timestamp, got: " + body["fromData"].(string))
+			}
+			if body["toData"] != "/Date(1700100000000+0000)/" {
+				panic("Expected toData with expanded timestamp, got: " + body["toData"].(string))
+			}
+			if body["label"] != "EVENTS" {
+				panic("Expected upper-cased label, got: " + body["label"].(string))
+			}
+			if body["offset"] != "12" {
+				panic("Expected offset=12 (add 2 10), got: " + body["offset"].(string))
+			}
+		}
+	}
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	vars := map[string]any{
+		"from": 1700000000,
+		"to":   1700100000,
+		"name": "events",
+		"page": 2,
+	}
+	err = craw.Run(context.TODO(), vars)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+	require.NotNil(t, resultMap["result"])
+}
+
+func TestDefaultMergeMapContextArrayResult(t *testing.T) {
+	// rootContext is {} (map) but request returns an array
+	configContent := `
+rootContext: {}
+steps:
+  - type: request
+    name: "Fetch items"
+    request:
+      url: https://api.example.com/items
+      method: GET
+    resultTransformer: .items
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/items": map[string]interface{}{
+			"items": []interface{}{
+				map[string]interface{}{"id": 1, "name": "A"},
+				map[string]interface{}{"id": 2, "name": "B"},
+			},
+		},
+	})
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array (not empty map)")
+	assert.Len(t, resultArray, 2)
+}
+
+func TestDefaultMergeArrayContextMapResult(t *testing.T) {
+	// rootContext is [] (array) but request returns a map
+	configContent := `
+rootContext: []
+steps:
+  - type: request
+    name: "Fetch details"
+    request:
+      url: https://api.example.com/details
+      method: GET
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/details": map[string]interface{}{
+			"status": "ok",
+			"count":  42,
+		},
+	})
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map (not empty array)")
+	assert.Equal(t, "ok", resultMap["status"])
+	assert.Equal(t, float64(42), resultMap["count"])
 }

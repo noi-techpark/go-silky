@@ -261,6 +261,64 @@ Expansion happens on the raw YAML text before parsing, so it works in any field 
 
 ---
 
+## Template Functions
+
+All Go template fields (URLs, headers, body values) support the full [Sprig](https://masterminds.github.io/sprig/) function library, providing 100+ functions for string manipulation, math, date formatting, encoding, and more.
+
+### Practical Examples
+
+**Timestamp formatting** (e.g., .NET `/Date()` pattern):
+```yaml
+body:
+  request:
+    fromData: '{{ printf "/Date(%d000+0000)/" .from }}'
+    toData: '{{ printf "/Date(%d000+0000)/" .to }}'
+```
+
+**Math operations:**
+```yaml
+request:
+  url: "https://api.example.com/items?offset={{ mul .page 50 }}"
+```
+
+**Conditional defaults:**
+```yaml
+request:
+  url: '{{ default "https://api.example.com" .baseUrl }}/data'
+  headers:
+    X-Format: '{{ default "json" .format | upper }}'
+```
+
+**String manipulation:**
+```yaml
+body:
+  name: '{{ .input | trim | upper }}'
+  slug: '{{ .title | lower | replace " " "-" }}'
+```
+
+**Base64 encoding:**
+```yaml
+headers:
+  Authorization: 'Basic {{ printf "%s:%s" .user .pass | b64enc }}'
+```
+
+### Function Reference
+
+| Category | Functions |
+|----------|-----------|
+| **String** | `upper`, `lower`, `trim`, `trimPrefix`, `trimSuffix`, `replace`, `contains`, `hasPrefix`, `hasSuffix`, `repeat`, `nospace`, `substr`, `quote` |
+| **Math** | `add`, `sub`, `mul`, `div`, `mod`, `max`, `min`, `floor`, `ceil`, `round` |
+| **Date/Time** | `now`, `date`, `dateModify`, `toDate`, `unixEpoch`, `dateInZone` |
+| **Default/Logic** | `default`, `empty`, `ternary`, `coalesce` |
+| **Type Conversion** | `toString`, `toInt`, `toFloat64`, `toJson`, `toPrettyJson` |
+| **Lists** | `list`, `first`, `last`, `join`, `has`, `sortAlpha` |
+| **Encoding** | `b64enc`, `b64dec` |
+| **Formatting** | `printf` (standard Go), `snakecase`, `camelcase`, `kebabcase` |
+
+For the complete function reference, see the [Sprig documentation](https://masterminds.github.io/sprig/).
+
+---
+
 ## Runtime Variables
 
 Silky supports runtime variables that can be injected into your configuration at execution time. This allows you to:

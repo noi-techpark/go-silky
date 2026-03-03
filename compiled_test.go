@@ -227,6 +227,88 @@ func TestCompiledTemplate_Execute(t *testing.T) {
 	assert.Equal(t, "Hello World!", result)
 }
 
+func TestSprigFunctionsInTemplate(t *testing.T) {
+	tests := []struct {
+		name     string
+		tmpl     string
+		ctx      map[string]any
+		expected string
+	}{
+		{
+			name:     "upper",
+			tmpl:     "{{ upper .name }}",
+			ctx:      map[string]any{"name": "hello"},
+			expected: "HELLO",
+		},
+		{
+			name:     "math add",
+			tmpl:     "{{ add .a .b }}",
+			ctx:      map[string]any{"a": 10, "b": 20},
+			expected: "30",
+		},
+		{
+			name:     "math mul",
+			tmpl:     "{{ mul .a .b }}",
+			ctx:      map[string]any{"a": 5, "b": 3},
+			expected: "15",
+		},
+		{
+			name:     "default value",
+			tmpl:     `{{ default "fallback" .missing }}`,
+			ctx:      map[string]any{},
+			expected: "fallback",
+		},
+		{
+			name:     "default with existing",
+			tmpl:     `{{ default "fallback" .name }}`,
+			ctx:      map[string]any{"name": "actual"},
+			expected: "actual",
+		},
+		{
+			name:     "A22 date pattern with printf",
+			tmpl:     `{{ printf "/Date(%d000+0000)/" .timestamp }}`,
+			ctx:      map[string]any{"timestamp": 1234567890},
+			expected: "/Date(1234567890000+0000)/",
+		},
+		{
+			name:     "trimPrefix",
+			tmpl:     `{{ trimPrefix "Bearer " .token }}`,
+			ctx:      map[string]any{"token": "Bearer abc123"},
+			expected: "abc123",
+		},
+		{
+			name:     "replace",
+			tmpl:     `{{ replace " " "_" .name }}`,
+			ctx:      map[string]any{"name": "hello world"},
+			expected: "hello_world",
+		},
+		{
+			name:     "ternary",
+			tmpl:     `{{ ternary "active" "inactive" .enabled }}`,
+			ctx:      map[string]any{"enabled": true},
+			expected: "active",
+		},
+		{
+			name:     "b64enc",
+			tmpl:     `{{ b64enc .data }}`,
+			ctx:      map[string]any{"data": "hello"},
+			expected: "aGVsbG8=",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := compileTemplate(tt.tmpl)
+			require.NoError(t, err)
+			require.NotNil(t, compiled)
+
+			result, err := compiled.Execute(tt.ctx)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // TestExtractTemplateFields tests field extraction from templates
 func TestExtractTemplateFields(t *testing.T) {
 	tests := []struct {

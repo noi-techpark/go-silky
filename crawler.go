@@ -339,7 +339,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			compiledStep:   exec.compiledStep,
 		}
 
-		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx)
+		req, urlObj, mergedBody, err := c.prepareHTTPRequest(reqCtx, templateCtx)
 		if err != nil {
 			c.profiler.EmitError("Prepare Request Error", pageID, err.Error())
 			return err
@@ -356,14 +356,14 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 			var resultBody interface{}
 			if req.Body != nil {
-				resultBody = next.BodyParams
+				resultBody = mergedBody
 			}
 
 			c.profiler.EmitURLComposition(pageID, exec.step, URLCompositionData{
 				URLTemplate:     exec.step.Request.URL,
 				PageNumber:      pageNum,
 				QueryParams:     next.QueryParams,
-				BodyParams:      next.BodyParams,
+				BodyParams:      mergedBody,
 				NextPageURL:     next.NextPageUrl,
 				TemplateContext: templateCtx,
 				ResultURL:       urlObj.String(),
@@ -383,8 +383,8 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 					curlCmd += fmt.Sprintf(" -H '%s: %s'", k, v[0])
 				}
 			}
-			if req.Body != nil && len(next.BodyParams) > 0 {
-				bodyJSON, _ := json.Marshal(next.BodyParams)
+			if req.Body != nil && len(mergedBody) > 0 {
+				bodyJSON, _ := json.Marshal(mergedBody)
 				curlCmd += fmt.Sprintf(" -d '%s'", string(bodyJSON))
 			}
 
@@ -401,7 +401,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				Method:      req.Method,
 				URL:         urlObj.String(),
 				Headers:     headers,
-				Body:        next.BodyParams,
+				Body:        mergedBody,
 			})
 		}
 
@@ -968,12 +968,16 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 		case []interface{}:
 			if resultArr, ok := result.([]interface{}); ok {
 				exec.currentContext.Data = append(data, resultArr...)
+			} else {
+				exec.currentContext.Data = result
 			}
 		case map[string]interface{}:
 			if resultMap, ok := result.(map[string]interface{}); ok {
 				for k, v := range resultMap {
 					data[k] = v
 				}
+			} else {
+				exec.currentContext.Data = result
 			}
 		default:
 			exec.currentContext.Data = result
@@ -997,7 +1001,7 @@ func (c *ApiCrawler) performMerge(exec *stepExecution, result any, templateCtx m
 }
 
 // prepareHTTPRequest builds an HTTP request from the context and pagination parameters
-func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[string]any) (*http.Request, *url.URL, error) {
+func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[string]any) (*http.Request, *url.URL, map[string]any, error) {
 	var urlObj *url.URL
 	var err error
 
@@ -1005,18 +1009,18 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	if ctx.nextPageURL != "" {
 		urlObj, err = url.Parse(ctx.nextPageURL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid nextPageURL %s: %w", ctx.nextPageURL, err)
+			return nil, nil, nil, fmt.Errorf("invalid nextPageURL %s: %w", ctx.nextPageURL, err)
 		}
 	} else {
 		// Template URL expansion
 		expandedURL, err := ctx.compiledStep.ExecuteURLTemplate(templateCtx, ctx.urlTemplate)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error executing URL template: %w", err)
+			return nil, nil, nil, fmt.Errorf("error executing URL template: %w", err)
 		}
 
 		urlObj, err = url.Parse(expandedURL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid URL %s: %w", expandedURL, err)
+			return nil, nil, nil, fmt.Errorf("invalid URL %s: %w", expandedURL, err)
 		}
 	}
 
@@ -1037,7 +1041,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	if ctx.compiledStep != nil && ctx.compiledStep.BodyTemplates != nil {
 		expandedBody, err := ctx.compiledStep.ExecuteBodyTemplates(templateCtx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error expanding body: %w", err)
+			return nil, nil, nil, fmt.Errorf("error expanding body: %w", err)
 		}
 		for k, v := range expandedBody {
 			mergedBody[k] = v
@@ -1064,7 +1068,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		case "application/json":
 			bodyJSON, err := json.Marshal(mergedBody)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error encoding JSON body: %w", err)
+				return nil, nil, nil, fmt.Errorf("error encoding JSON body: %w", err)
 			}
 			reqBody = bytes.NewReader(bodyJSON)
 
@@ -1076,14 +1080,14 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 			reqBody = bytes.NewReader([]byte(formData.Encode()))
 
 		default:
-			return nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
+			return nil, nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
 		}
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest(ctx.method, urlObj.String(), reqBody)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating HTTP request: %w", err)
+		return nil, nil, nil, fmt.Errorf("error creating HTTP request: %w", err)
 	}
 
 	// Apply headers (priority: global < request-specific)
@@ -1091,7 +1095,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	// Use pre-compiled global headers
 	expandedGlobalHeaders, err := c.CompiledConfig.ExecuteGlobalHeaders(templateCtx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error expanding global headers: %w", err)
+		return nil, nil, nil, fmt.Errorf("error expanding global headers: %w", err)
 	}
 	for k, v := range expandedGlobalHeaders {
 		req.Header[k] = []string{v}
@@ -1102,7 +1106,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	// Execute pre-compiled header templates
 	expandedHeaders, err := ctx.compiledStep.ExecuteHeaderTemplates(templateCtx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error expanding headers: %w", err)
+		return nil, nil, nil, fmt.Errorf("error expanding headers: %w", err)
 	}
 	for k, v := range expandedHeaders {
 		req.Header[k] = []string{v}
@@ -1128,7 +1132,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	// Apply authentication
 	ctx.authenticator.PrepareRequest(req, ctx.requestID)
 
-	return req, urlObj, nil
+	return req, urlObj, mergedBody, nil
 }
 
 func childMapWith(base map[string]*Context, currentCotnext *Context, key string, value interface{}) map[string]*Context {

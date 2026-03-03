@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"text/template"
 
+	sprig "github.com/Masterminds/sprig/v3"
 	"github.com/itchyny/gojq"
 )
 
@@ -392,7 +393,7 @@ func compileTemplate(source string) (*CompiledTemplate, error) {
 		return nil, nil
 	}
 
-	tmpl, err := template.New("dynamic").Parse(source)
+	tmpl, err := template.New("dynamic").Funcs(sprig.FuncMap()).Parse(source)
 	if err != nil {
 		return nil, fmt.Errorf("invalid template '%s': %w", source, err)
 	}
