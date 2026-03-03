@@ -269,7 +269,13 @@
         "language": "yaml",
         "path": "./snippets/silky.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "files.associations": {
+        "*.silky.yaml": "yaml",
+        "*.silky.yml": "yaml"
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run esbuild-base -- --minify && npm run build:binary:all",

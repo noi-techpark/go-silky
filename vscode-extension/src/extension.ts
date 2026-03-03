@@ -927,31 +927,10 @@ function escapeHtml(text: string): string {
         .replace(/'/g, '&#039;');
 }
 
-async function configureYamlExtension(context: vscode.ExtensionContext) {
-    // Configure YAML extension to recognize .silky.yaml files
-    const yamlConfig = vscode.workspace.getConfiguration('yaml');
-    const filesConfig = vscode.workspace.getConfiguration('files');
-
-    // Get schema URI
-    const schemaUri = vscode.Uri.joinPath(context.extensionUri, 'schemas', 'silky-schema.json');
-
-    // Configure schemas
-    const schemas = yamlConfig.get<Record<string, string[]>>('schemas') || {};
-    const schemaKey = schemaUri.toString();
-
-    if (!schemas[schemaKey] || !schemas[schemaKey].includes('*.silky.yaml')) {
-        schemas[schemaKey] = ['*.silky.yaml', '*.silky.yml'];
-        await yamlConfig.update('schemas', schemas, vscode.ConfigurationTarget.Workspace);
-    }
-
-    // Configure file associations
-    const associations = filesConfig.get<Record<string, string>>('associations') || {};
-
-    if (associations['*.silky.yaml'] !== 'yaml') {
-        associations['*.silky.yaml'] = 'yaml';
-        associations['*.silky.yml'] = 'yaml';
-        await filesConfig.update('associations', associations, vscode.ConfigurationTarget.Workspace);
-    }
+async function configureYamlExtension(_context: vscode.ExtensionContext) {
+    // Schema and file associations are declared in package.json via
+    // contributes.yamlValidation and contributes.configurationDefaults,
+    // so no runtime workspace settings writes are needed.
 
     // Notify user if YAML extension is not installed
     const yamlExtension = vscode.extensions.getExtension('redhat.vscode-yaml');

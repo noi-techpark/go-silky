@@ -4,12 +4,12 @@ This directory contains pre-built binaries for different platforms.
 
 ## Available Binaries
 
-- **linux/amd64**: `silky-linux-amd64` (9.68 MB)
-- **linux/arm64**: `silky-linux-arm64` (9.00 MB)
-- **darwin/amd64**: `silky-darwin-amd64` (9.90 MB)
-- **darwin/arm64**: `silky-darwin-arm64` (9.26 MB)
-- **windows/amd64**: `silky-windows-amd64.exe` (9.96 MB)
-- **windows/arm64**: `silky-windows-arm64.exe` (9.12 MB)
+- **linux/amd64**: `silky-linux-amd64` (10.45 MB)
+- **linux/arm64**: `silky-linux-arm64` (9.75 MB)
+- **darwin/amd64**: `silky-darwin-amd64` (10.70 MB)
+- **darwin/arm64**: `silky-darwin-arm64` (10.01 MB)
+- **windows/amd64**: `silky-windows-amd64.exe` (10.76 MB)
+- **windows/arm64**: `silky-windows-arm64.exe` (9.86 MB)
 
 ## Usage
 
