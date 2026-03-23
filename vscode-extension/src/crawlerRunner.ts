@@ -57,7 +57,9 @@ export class CrawlerRunner {
 
                 return new Promise<void>((resolve, reject) => {
                     // Determine if we're using bundled binary or go run
-                    const usingBundled = idePath.includes('/bin') && idePath.includes(this.context.extensionPath);
+                    // Use path.join to ensure correct separators on all platforms (Windows uses \, not /)
+                    const binDir = path.join(this.context.extensionPath, 'bin');
+                    const usingBundled = path.resolve(idePath) === path.resolve(binDir);
 
                     let command: string;
                     let args: string[];
