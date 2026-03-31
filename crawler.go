@@ -1130,7 +1130,9 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 
 	// Apply authentication
-	ctx.authenticator.PrepareRequest(req, ctx.requestID)
+	if err := ctx.authenticator.PrepareRequest(req, ctx.requestID); err != nil {
+		return nil, nil, nil, err
+	}
 
 	return req, urlObj, mergedBody, nil
 }

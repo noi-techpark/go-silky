@@ -423,8 +423,10 @@ func (a *CookieAuthenticator) PrepareRequest(req *http.Request, requestID string
 
 func (a *CookieAuthenticator) performLogin(requestID string) error {
 	loginID := a.profiler.emit(EVENT_AUTH_LOGIN_START, "Cookie Login Request", requestID, map[string]any{
-		"url":    a.loginRequest.URL,
-		"method": a.loginRequest.Method,
+		"url":     a.loginRequest.URL,
+		"method":  a.loginRequest.Method,
+		"headers": a.loginRequest.Headers,
+		"body":    a.loginRequest.Body,
 	})
 	startTime := time.Now()
 	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
@@ -574,8 +576,10 @@ func (a *JWTAuthenticator) PrepareRequest(req *http.Request, requestID string) e
 
 func (a *JWTAuthenticator) performLogin(requestID string) error {
 	loginID := a.profiler.emit(EVENT_AUTH_LOGIN_START, "JWT Login Request", requestID, map[string]any{
-		"url":    a.loginRequest.URL,
-		"method": a.loginRequest.Method,
+		"url":     a.loginRequest.URL,
+		"method":  a.loginRequest.Method,
+		"headers": a.loginRequest.Headers,
+		"body":    a.loginRequest.Body,
 	})
 
 	startTime := time.Now()
@@ -846,8 +850,10 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 
 func (a *CustomAuthenticator) performLogin(requestID string) error {
 	loginID := a.profiler.emit(EVENT_AUTH_LOGIN_START, "Custom Login Request", requestID, map[string]any{
-		"url":    a.loginRequest.URL,
-		"method": a.loginRequest.Method,
+		"url":     a.loginRequest.URL,
+		"method":  a.loginRequest.Method,
+		"headers": a.loginRequest.Headers,
+		"body":    a.loginRequest.Body,
 	})
 	startTime := time.Now()
 	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
